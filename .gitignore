@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+
+# Личные настройки: копируется из config.env.example при установке
+config.env
