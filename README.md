@@ -27,7 +27,7 @@ Claude Code Desktop**, которая читает тот же отчёт в JSO
 
 ## Требования
 
-- Linux или WSL
+- Linux или WSL (из Windows — через `wsl.exe`, см. ниже)
 - `python3` 3.8 и новее, только стандартная библиотека
 - `git`
 - токены: Moodle (служба *mobile web service*), GitVerse, SourceCraft — нужны только
@@ -78,6 +78,31 @@ digest/study digest      # первый запуск сохраняет сним
 После создания нажать **Run now** и на запросах разрешений выбрать «always allow»:
 разрешение выдаётся один раз на `study`, а не на каждую команду, иначе следующие
 запуски остановятся на подтверждении.
+
+### Claude Code в Windows, `study` в WSL
+
+Задача Claude Code Desktop запускается в Windows, а программа живёт в WSL. Рабочая
+папка тогда задаётся как `\\wsl.localhost\<дистрибутив>\home\<...>\study`, но оболочка
+у задачи остаётся windows-овой (Git Bash), и `cd /home/...` в ней не работает. Все
+команды идут через `wsl.exe`:
+
+```bash
+MSYS_NO_PATHCONV=1 wsl.exe -d ubuntu -- bash -c '~/work/study/digest/study state --json'
+```
+
+- `MSYS_NO_PATHCONV=1` обязателен: без него Git Bash подставляет windows-путь вместо
+  unix-пути в аргументах (`/tmp/x.sh` → `C:/Program Files/Git/mnt/c/...`), и команда
+  не находится.
+- Однострочники `bash -lc '…'` переживают не всякие кавычки: в цикле `for d in …`
+  переменная приходит пустой, и проверка молча обходит не те каталоги. Всё длиннее
+  одной команды класть в скрипт.
+- Скрипт пишется из Windows прямо в файловую систему WSL — `//wsl.localhost/<дистрибутив>/tmp/x.sh`,
+  запускается как `bash /tmp/x.sh`.
+- Разрешение запрашивается на `wsl.exe`, а не на `study`: «always allow» выдавать
+  нужно ему.
+
+Файлы при этом читаются и по windows-пути напрямую, без `wsl.exe`: `stash/`, `NOTES.md`
+и `config.env` доступны как обычные файлы рабочей папки.
 
 Что и как попадает в ответ, настраивается двумя файлами рядом, без правки самой задачи:
 `daily-digest-prompt.md` — шаги проверки, `daily-digest-template.md` — структура ответа.
