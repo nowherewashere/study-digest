@@ -104,11 +104,14 @@ class SourceCraft(Hosting):
                  "status": r.get("status"), "assets": len(r.get("assets") or []),
                  "url": self.web_url(r.get("tag"))} for r in out.get("releases", [])]
 
-    def release(self, tag, title, notes, sha=None, branch="master"):
-        """REST вместо CLI src: те же поля, что у src release create --publish."""
-        out = self.api(f"/repos/{self.repo}/releases",
-                       json_body={"tag": tag, "target_branch": branch, "title": title,
-                                  "release_notes": notes, "publish": True}) or {}
+    def release(self, tag, title, notes, sha=None, branch=None):
+        """REST вместо CLI src. target_branch заставляет SourceCraft создать тег самому
+        и даёт 409 BranchAlreadyExists, если тег уже запушен; по нашему порядку тег
+        всегда есть, поэтому поле передаём только по явной просьбе."""
+        body = {"tag": tag, "title": title, "release_notes": notes, "publish": True}
+        if branch:
+            body["target_branch"] = branch
+        out = self.api(f"/repos/{self.repo}/releases", json_body=body) or {}
         return {"tag": out.get("tag", tag), "status": out.get("status"),
                 "url": self.web_url(tag)}
 

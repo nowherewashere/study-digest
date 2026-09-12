@@ -59,8 +59,10 @@ Swagger открыт: `https://api.sourcecraft.tech/sourcecraft.swagger.json`.
 | `POST /orgs/{org}/repos` | создать репозиторий |
 | `GET /repos/{org}/{repo}` | сведения о репозитории |
 
-Тело создания релиза: `tag`, `target_branch`, `title`, `release_notes`, `publish`.
+Тело создания релиза: `tag`, `title`, `release_notes`, `publish` и необязательный `target_branch`.
 Это то же самое, что делает `src release create --publish`, поэтому **CLI `src` не нужен**.
+**`target_branch` не передавать, если тег уже запушен**: с ним сервер сам создаёт тег и отвечает
+`409 BranchAlreadyExists` (так упал релиз v1.2.0 2026-09-12). Без поля релиз вешается на существующий тег.
 
 Ссылка на релиз для человека: `https://sourcecraft.dev/{org}/{repo}/releases/{tag}`.
 
