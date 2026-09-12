@@ -14,6 +14,7 @@ DEFAULTS = {
     "TUIS_TOKEN_FILE": "~/.config/tuis/token",
     "GITVERSE_TOKEN_FILE": "~/.config/gitverse/token",
     "SOURCECRAFT_TOKEN_FILE": "~/.config/sourcecraft/token",
+    "RUTUBE_TOKEN_FILE": "~/.config/rutube/token",
     "DIGEST_DAYS": "21",
     "DIGEST_STATE": "~/.config/tuis/state.json",
     "GV_REPO": "",

@@ -11,7 +11,7 @@ import sys
 from . import answer as answer_mod
 from . import digest as digest_mod
 from . import files as files_mod
-from . import hosting, local
+from . import hosting, rutube, local
 from .config import Config, StudyError
 from .fmt import moment, table
 from .moodle import Moodle
@@ -231,6 +231,23 @@ def cmd_host_api(cfg, args):
     return out, json.dumps(out, ensure_ascii=False, indent=1)
 
 
+def cmd_rt_login(cfg, args):
+    out = rutube.Rutube(cfg).login(args.email)
+    return out, "Токен Rutube сохранён: " + out["token_file"]
+
+
+def cmd_rt_me(cfg, args):
+    rows = rutube.Rutube(cfg).me()
+    return rows, table([[str(v["id"]), v["title"] or "", "скрыто" if v["hidden"] else "",
+                         v["url"] or ""] for v in rows],
+                       ["id", "название", "", "ссылка"]) or "токен работает, видео пока нет"
+
+
+def cmd_rt_api(cfg, args):
+    out = rutube.Rutube(cfg).api(args.path)
+    return out, json.dumps(out, ensure_ascii=False, indent=1)
+
+
 # --- сводки
 
 def cmd_digest(cfg, args):
@@ -343,6 +360,17 @@ def build_parser():
         q = hs.add_parser("api", help="произвольный запрос", parents=[common])
         q.set_defaults(fn=cmd_host_api)
         q.add_argument("path", help="например /repos/owner/repo/releases")
+
+    rt = sub.add_parser("rt", help="Rutube: вход и видео")
+    rts = rt.add_subparsers(dest="rtcmd", required=True, metavar="команда")
+    lg = rts.add_parser("login", help="получить токен по email и паролю (пароль не хранится)",
+                        parents=[common])
+    lg.set_defaults(fn=cmd_rt_login)
+    lg.add_argument("--email")
+    rts.add_parser("me", help="проверить токен: мои видео", parents=[common]).set_defaults(fn=cmd_rt_me)
+    ra = rts.add_parser("api", help="произвольный GET к rutube.ru/api", parents=[common])
+    ra.set_defaults(fn=cmd_rt_api)
+    ra.add_argument("path", help="например /video/person/")
     return p
 
 

@@ -46,6 +46,7 @@ curl -fsSL https://raw.githubusercontent.com/nowherewashere/study-digest/master/
 | Moodle | профиль → «Ключи безопасности» → служба *Moodle mobile web service*; значение показывается один раз |
 | GitVerse | иконка пользователя → Настройки → Управление токенами, доступ «Репозитории» |
 | SourceCraft | Home → Access → Personal Access Tokens |
+| Rutube | `study rt login` — спросит email и пароль аккаунта (вход по VK ID не подходит, задайте пароль в настройках Rutube), сохранит только токен в `~/.config/rutube/token` |
 
 Свои настройки лежат в `config.env` — он создаётся при установке из
 `config.env.example` и в репозиторий не попадает. Осталось вписать в него курсы:
