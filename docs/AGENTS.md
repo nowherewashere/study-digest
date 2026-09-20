@@ -32,7 +32,7 @@
 | `study answer <код> <NN\|hwNN> [--tag]` | заготовка ответа: первый запуск создаёт `tuis/labNN.env`, после заполнения пишет `tuis/labNN.md` |
 | `study submit <id> [--text F] [--attach <файл>…] [--files <itemid>] --confirm` | отправка ответа; без `--confirm` — план и код возврата 1. План сверяет с настройками задания (текст включён? сколько файлов, какие типы и размер) и отказывает при несовпадении даже с `--confirm`; `--attach` сам загружает файлы при отправке (`study upload` + `--files <itemid>` — старый путь, состав по itemid не проверяется) |
 | `study me / courses [--setup] / functions / call <fn> k=v` | токен, курсы (список / настройка игнора и папок), ручки Moodle, произвольный вызов |
-| `study assigns / calendar / grades / status <id>` | задания, дедлайны, баллы, состояние ответа |
+| `study assigns [--course <код>] / calendar / grades / status <id>` | задания, дедлайны, баллы, состояние ответа; в `--json assigns` у каждого задания есть `intro` — текст задания из ТУИС |
 | `study gv releases \| release <тег> --title T --notes F \| update <тег> … \| asset <id-релиза> <файл> \| api <путь>` | GitVerse; запускать из каталога репозитория курса — репо берётся из remote `origin` |
 | `study sc releases \| release … \| update … \| asset <тег> <файл> \| api <путь>` | SourceCraft, remote `src`; ссылки на gitverse в заметках релиза подменяются |
 | `study rt jwt \| login \| me \| video \| edit \| playlist … \| upload … --confirm` | Rutube: вход, свои видео и плейлисты, загрузка |

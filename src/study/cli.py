@@ -11,7 +11,7 @@ import time
 
 from . import agent, answer, courses, digest, files, hosting, local, setup, update
 from .config import Config, Course, StudyError
-from .fmt import moment, table
+from .fmt import moment, plain, table
 from .moodle import Moodle, accepts, accepts_line, check_submission, mb
 from .rutube import DEFAULT_CATEGORY, Rutube
 
@@ -84,7 +84,8 @@ def cmd_assigns(cfg, args):
         for a in c["assignments"]:
             due = moment(a.get("duedate"))
             rows.append({"course": {"id": c["id"], "title": c["fullname"]},
-                         "assign_id": a["id"], "cmid": a["cmid"], "name": a["name"], "due": due})
+                         "assign_id": a["id"], "cmid": a["cmid"], "name": a["name"], "due": due,
+                         "intro": plain(a.get("intro"), 2000)})   # текст задания — только в JSON
             lines.append("  id={} cmid={} до {}  {}".format(
                 a["id"], a["cmid"], due["text"] if due else "—", a["name"]))
     if warnings:

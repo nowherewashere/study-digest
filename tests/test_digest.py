@@ -107,6 +107,7 @@ class CollectorTest(DigestCase):
                          ["ДЗ 1 — Кодирование", "ЛР 3 — DHCP", "ЛР 1 — Vagrant и Packer",
                           "Пересдача ЛР 5"])
         self.assertEqual(names(d["new_assignments"]), ["ДЗ 1 — Кодирование"])
+        self.assertEqual(d["new_courses"], [])
         self.assertEqual([(a["short"], a["was"]["ts"], a["due"]["ts"]) for a in d["moved"]],
                          [("ЛР 2 — DNS", DUE[-3], DUE[-2])])
         # состав курса: скрытое задание — «доступ закрыт»; тема не выбрана — submission "new"
@@ -259,10 +260,18 @@ class CollectorTest(DigestCase):
         self.assertEqual(s["files"], KEYS)   # состав курса 2 не прочитался — прошлый список
         self.assertIn("состав курса 2", [e["where"] for e in c.errors])
 
+    def test_new_course(self):
+        _, d = self.collect(state={**STATE, "courses": {"1": "Сетевые технологии"}})
+        self.assertEqual(d["new_courses"],
+                         [{"id": 2, "code": None, "title": "Вычислительные методы"}])
+        self.assertIn("\nНовый курс в ТУИС: Вычислительные методы (id 2) — строка `CODE 2 <папка>` "
+                      "или `COURSE_IGNORE` в config.env.", digest.render_digest(d))
+
     def test_first_run(self):
         _, d = self.collect(state={})
         self.assertTrue(d["first_run"])
-        self.assertEqual((d["updates"], d["new_assignments"], d["moved"]), ([], [], []))
+        self.assertEqual((d["updates"], d["new_assignments"], d["moved"], d["new_courses"]),
+                         ([], [], [], []))
         self.assertFalse(any(i["new"] for g in d["grades"] for i in g["items"]))
         self.assertEqual([n["id"] for n in d["notifications"]], [902, 903])
         text = digest.render_digest(d)

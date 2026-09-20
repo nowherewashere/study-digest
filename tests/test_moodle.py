@@ -217,6 +217,18 @@ class AcceptsTest(unittest.TestCase):
         self.assertEqual(check_submission(None, None, [zip_]), [])   # настроек нет — пропускаем
 
 
+class AssignsTest(unittest.TestCase):
+    def test_intro_in_json_only(self):
+        tmp = tmpdir(self)
+        net_ = FakeNet().install(self)
+        net_.reply("POST", "mod_assign_get_assignments", fixture("assignments"))
+        data, text = cli.cmd_assigns(config(tmp), argparse.Namespace(course=None))
+        row = next(r for r in data["assignments"] if r["assign_id"] == 11)
+        self.assertEqual(row["intro"], "Сдать отчет по лабораторной работе № 1. Vagrant и Packer")
+        self.assertNotIn("<p>", text)
+        self.assertIn("id=11 cmid=111", text)
+
+
 class SubmitTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tmpdir(self)

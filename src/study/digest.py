@@ -66,6 +66,7 @@ class Collector:
         self.known = state.get("assignments", {})     # id задания → срок с прошлого запуска
         self.graded = state.get("grades")             # {курс: {работа: балл}}; None — нет снимка
         self.files = state.get("files")               # {курс: [cmid/файл]}; None — нет состава
+        self.seen_courses = state.get("courses")      # {id: название}; None — снимка нет
         self.errors = list(errors)                    # с чем пришёл снимок
         self.courses = {c.id: c for c in cfg.track(moodle.courses())}
         self.ignore = cfg.ignore()   # решение пользователя: этих курсов в сводке нет вовсе
@@ -330,6 +331,10 @@ class Collector:
             "first_run": not self.since,
             "since": moment(self.since, self.now) if self.since else None,
             "courses": [c.as_dict() for c in self.courses.values()],
+            # курс, которого не было в снимке: новая запись или снятый игнор
+            "new_courses": [c.as_dict() for c in self.courses.values()
+                            if self.seen_courses is not None
+                            and str(c.id) not in self.seen_courses],
             "deadlines": deadlines,
             "overdue": [a for a in overdue if a["submission"] in ("new", None)],
             "submitted": [a for a in overdue if a["submission"] not in ("new", None)],
@@ -505,6 +510,10 @@ def render(d):
         out.append("\nПервый запуск: обновления в курсах начнут отслеживаться со следующего раза. "
                    "Материалы курсов пока не скачаны: `study files --pull` — "
                    "в пустую stash/ забирает всё.")
+    for c in t.get("new_courses", []):
+        out.append(f"\nНовый курс в ТУИС: {c['title']} (id {c['id']}) — "
+                   + (f"папка {c['code']}." if c["code"] else
+                      f"строка `CODE {c['id']} <папка>` или `COURSE_IGNORE` в config.env."))
 
     news = news_rows(t)
     rows = deadline_rows(t)
@@ -514,7 +523,7 @@ def render(d):
     elif d.get("tuis") is None:
         out.append("\nТУИС не опрашивался (`--local`): только состояние репозиториев.")
     else:
-        tail = "" if news or t.get("first_run") else " Обновлений нет."
+        tail = "" if news or t.get("first_run") or t.get("new_courses") else " Обновлений нет."
         out.append(f"\nСроков в ближайшие {d['days']} дн нет.{tail}")
 
     trouble = [s for s in map(repo_trouble, d["courses"]) if s]
