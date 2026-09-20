@@ -15,7 +15,16 @@
   "canedit": true,
   "cansubmit": true,
   "blindmarking": false,
-  "teamsubmission": null,
+  "teamsubmission": {
+   "id": 5009,
+   "userid": 0,
+   "attemptnumber": 0,
+   "timecreated": 1789333140,
+   "timemodified": 1789333140,
+   "status": "submitted",
+   "groupid": 44,
+   "plugins": []
+  },
   "extensionduedate": null,
   "gradingstatus": "notgraded"
  },

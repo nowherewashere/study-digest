@@ -6,7 +6,12 @@ from .config import StudyError
 from .fmt import plain
 
 PAGE = 50   # предел limitnum у календаря
-WRITE = {"mod_assign_save_submission"}   # необратимые ручки: без повторов (см. net.RETRIES)
+# необратимые ручки: без повторов (см. net.RETRIES)
+WRITE = {"mod_assign_save_submission", "mod_assign_submit_for_grading"}
+# Состояние ответа на задание: подписи и то, что ещё ждёт ответа
+SUBMISSION = {"new": "не сдано", "draft": "черновик", "reopened": "на доработку",
+              "submitted": "сдано", "offline": "очно / без ответа в ТУИС"}
+PENDING = {"new", "draft", "reopened"}
 
 
 class Moodle:
@@ -180,6 +185,35 @@ def feedback_text(status):
             if field.get("name") == "comments" and field.get("text"):
                 return plain(field["text"], 2000)
     return None
+
+
+def submission_state(assign, st, now):
+    """Состояние ответа по заданию (mod_assign_get_assignments) и статусу
+    (mod_assign_get_submission_status) — единственное место, знающее семантику Moodle:
+    одно поле здесь не значит ничего, у каждого свой сентинел. Времена — unix или None."""
+    la = st.get("lastattempt") or {}
+    status = (la.get("submission") or {}).get("status") or "new"
+    team = assign.get("teamsubmission") == 1
+    if team and status == "new" and (la.get("teamsubmission") or {}).get("status"):
+        status = la["teamsubmission"]["status"]   # ответ группы сдал одногруппник
+    grade = grade_of(st)
+    graded = bool(la.get("graded")) or grade is not None   # с marking workflow — после релиза
+    if grade is not None and status == "new":
+        status = "submitted"   # очная защита оценена без файла (#2)
+    if status == "new" and (la.get("submissionsenabled") is False
+                            or assign.get("nosubmissions") == 1):
+        status = "offline"     # плагинов ответа нет: сдаётся очно, слать нечего
+    ext = la.get("extensionduedate") or 0   # бывает 0, null и ts
+    due = ext or assign.get("duedate") or 0
+    cutoff = assign.get("cutoffdate") or 0
+    cutoff = max(cutoff, ext) if cutoff else 0   # продление поднимает и cutoff (submissions_open)
+    opens = assign.get("allowsubmissionsfromdate") or 0
+    opens = opens if opens > now else 0
+    canedit = la.get("canedit")   # серверный submissions_open(): cutoff, продление, locked, запись
+    return {"status": status, "grade": grade, "feedback": feedback_text(st), "graded": graded,
+            "closed": canedit is False and not opens and status in PENDING,
+            "locked": bool(la.get("locked")), "opens": opens or None, "due": due or None,
+            "cutoff": cutoff or None, "canedit": canedit, "team": team}
 
 
 # --- правила сдачи задания

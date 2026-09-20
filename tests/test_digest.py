@@ -27,9 +27,10 @@ def queue(net, since=True):
     net.reply("POST", "core_webservice_get_site_info", fixture("site_info"))
     net.reply("POST", "core_enrol_get_users_courses", fixture("users_courses"))
     net.reply("POST", "mod_assign_get_assignments", fixture("assignments"))
-    # 18 (пересдача сданной ЛР 2) статуса не запрашивает: ответа нет, и done() это проверит
-    for aid, status in ((13, "new"), (12, "submitted"), (15, "new"), (11, "new"),
-                        (21, "submitted"), (19, "new"), (20, "new")):
+    # 18 (пересдача сданной ЛР 2) статуса не запрашивает: ответа нет, и done() это проверит;
+    # 13 и 19 — приём закрыт (canedit false), 21 — сдал одногруппник (teamsubmission)
+    for aid, status in ((13, "closed"), (12, "submitted"), (15, "new"), (11, "new"),
+                        (21, "team"), (19, "closed"), (20, "new")):
         net.reply("POST", ("mod_assign_get_submission_status", f"assignid={aid}"),
                   fixture(f"submission_status_{status}"))
     net.reply("POST", ("core_course_get_contents", "courseid=1"), fixture("course_contents"))
@@ -109,9 +110,14 @@ class CollectorTest(DigestCase):
                           "Доклад к лекции 1", "Опрос о курсе", "Пересдача ЛР 5", "ЛР 1"])
         self.assertEqual(names(d["overdue"]), ["ДЗ 1 — Кодирование"])
         self.assertEqual(names(d["submitted"]), ["ЛР 2 — DNS"])
+        # ДЗ 1 просрочено и приём закрыт (cutoff = срок, canedit false) — не в «Горит»
         self.assertEqual(names(d["not_started"]),
-                         ["ДЗ 1 — Кодирование", "ЛР 3 — DHCP", "ЛР 1 — Vagrant и Packer",
-                          "Пересдача ЛР 5"])
+                         ["ЛР 3 — DHCP", "ЛР 1 — Vagrant и Packer", "Пересдача ЛР 5"])
+        by = {a["short"]: a for a in d["overdue"] + d["deadlines"] + d["submitted"]}
+        self.assertTrue(by["ДЗ 1 — Кодирование"]["closed"])
+        self.assertEqual(by["ЛР 3 — DHCP"]["opens"]["ts"], 1789581600)   # приём ещё не открыт
+        self.assertEqual((by["ЛР 1"]["submission"], by["ЛР 1"]["graded"]),
+                         ("submitted", False))   # групповое: сдал одногруппник, не оценено
         self.assertEqual(names(d["new_assignments"]), ["ДЗ 1 — Кодирование"])
         self.assertEqual(d["new_courses"], [])
         self.assertEqual([(a["short"], a["was"]["ts"], a["due"]["ts"]) for a in d["moved"]],
@@ -313,6 +319,39 @@ class CollectorTest(DigestCase):
         self.assertEqual([e["where"] for e in d["errors"]], ["объявления курса 2"])
         # у курса 2 форум не прочитался — прежний список
         self.assertEqual(c.snapshot(d)["announcements"], {"1": [500, 501], "2": [7]})
+
+    def test_offline_locked_extension(self):
+        def run(aid, patch_status, state=STATE):
+            queue(self.net)
+            self.net.drop("mod_assign_get_submission_status", f"assignid={aid}")
+            st = fixture("submission_status_new")
+            st["lastattempt"].update(patch_status)
+            self.net.reply("POST", ("mod_assign_get_submission_status", f"assignid={aid}"), st)
+            c = digest.Collector(self.cfg, Moodle(self.cfg), 21, state)
+            d = c.run()
+            return c, d, {a["short"]: a for a in d["overdue"] + d["deadlines"] + d["submitted"]}
+
+        # очное задание (плагинов ответа нет): не сдано, но слать нечего — не в «Горит»
+        _, d, by = run(13, {"submissionsenabled": False})
+        self.assertEqual(by["ДЗ 1 — Кодирование"]["submission"], "offline")
+        self.assertIn("ДЗ 1 — Кодирование", names(d["overdue"]))
+        self.assertNotIn("ДЗ 1 — Кодирование", names(d["not_started"]))
+        self.assertIn("| **очно / без ответа в ТУИС** |", digest.render_digest(d))
+        # заблокировано преподавателем
+        _, d, by = run(11, {"locked": True, "canedit": False})
+        self.assertTrue(by["ЛР 1 — Vagrant и Packer"]["closed"])
+        self.assertNotIn("ЛР 1 — Vagrant и Packer", names(d["not_started"]))
+        self.assertIn("| ЛР 1 — Vagrant и Packer | nettech | заблокировано |",
+                      digest.render_digest(d))
+        # индивидуальное продление: из просроченного — в сроки, снимок хранит исходный срок
+        c, d, by = run(13, {"canedit": True, "extensionduedate": NOW + DAY})
+        hw = by["ДЗ 1 — Кодирование"]
+        self.assertEqual((hw["due"]["ts"], hw["closed"]), (NOW + DAY, False))
+        self.assertIn("ДЗ 1 — Кодирование", names(d["deadlines"]))
+        self.assertNotIn("ДЗ 1 — Кодирование", names(d["overdue"]))
+        self.assertIn("ДЗ 1 — Кодирование", names(d["not_started"]))
+        self.assertEqual(c.snapshot(d)["assignments"]["13"], DUE[-5])
+        self.assertNotIn("ДЗ 1 — Кодирование", names(d["moved"]))   # продление — не сдвиг срока
 
     def test_grades_and_outside(self):
         _, d = self.collect()

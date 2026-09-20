@@ -4,14 +4,12 @@
 по запросу. С неё агент разбирает задание и отвечает на вопросы о нём.
 """
 import re
+import time
 
 from . import local
 from .config import ROOT, StudyError
 from .fmt import moment, parse_name, plain, short_name
-from .moodle import accepts, accepts_line, feedback_text, grade_of
-
-SUBMISSION = {"new": "не сдано", "draft": "черновик", "reopened": "на доработку",
-              "submitted": "сдано"}
+from .moodle import SUBMISSION, accepts, accepts_line, submission_state
 
 
 def find(assigns, what, label):
@@ -64,6 +62,7 @@ def build(cfg, moodle, course, what):
     st = moodle.submission_status(a["id"])
     sub = (st.get("lastattempt") or {}).get("submission") or {}
     fb = st.get("feedback") or {}
+    s = submission_state(a, st, int(time.time()))
     p = parse_name(a["name"])
     num = p["num"].zfill(2) if p and p["work"] == "lab" else None
     flow = local.flow_of(cfg, course.code) if course.code else None
@@ -71,17 +70,18 @@ def build(cfg, moodle, course, what):
     return {"course": {"id": course.id, "code": course.code,
                        "title": c["fullname"] if c else course.title},
             "assign_id": a["id"], "cmid": a["cmid"], "name": a["name"],
-            "short": short_name(a["name"]), "num": num, "due": moment(a.get("duedate")),
+            "short": short_name(a["name"]), "num": num, "due": moment(s["due"]),
+            "opens": moment(s["opens"]), "closed": s["closed"], "locked": s["locked"],
+            "canedit": s["canedit"], "team": s["team"], "graded": s["graded"],
             "accepts": acc, "accepts_line": accepts_line(acc),
             "intro": plain(a.get("intro"), 20000),
             "attachments": [{"name": f.get("filename"), "url": f.get("fileurl")}
                             for f in a.get("introattachments") or []],
-            "submission": {"status": sub.get("status") or "new",
-                           "attempt": sub.get("attemptnumber"),
+            "submission": {"status": s["status"], "attempt": sub.get("attemptnumber"),
                            "modified": moment(sub.get("timemodified"))},
-            "grade": grade_of(st),
-            "grade_text": fb.get("gradefordisplay") if grade_of(st) is not None else None,
-            "feedback": feedback_text(st), "flow": flow,
+            "grade": s["grade"],
+            "grade_text": fb.get("gradefordisplay") if s["grade"] is not None else None,
+            "feedback": s["feedback"], "flow": flow,
             "local": on_disk(cfg, course.code, num, flow), "stash": in_stash(course.code, num)}
 
 
@@ -110,6 +110,10 @@ def render(d):
         state += f" · балл {d['grade']}" + (f" ({d['grade_text']})" if d["grade_text"] else "")
     if s["modified"] and s["status"] != "new":   # у несданного Moodle подставляет срок
         state += f" · изменён {s['modified']['full']}"
+    if d["opens"]:
+        state += f" · откроется {d['opens']['full']}"
+    elif d["closed"]:
+        state += " · заблокировано" if d["locked"] else " · приём закрыт"
     head = (f"{d['short']} · {d['course']['code'] or d['course']['title']} · id {d['assign_id']}"
             f" · cmid {d['cmid']}")
     out = [head, f"Срок: {due['full']} ({due['left']})" if due else "Срок: —",

@@ -12,11 +12,11 @@
   "submissionsenabled": true,
   "locked": false,
   "graded": false,
-  "canedit": true,
-  "cansubmit": true,
+  "canedit": false,
+  "cansubmit": false,
   "blindmarking": false,
   "teamsubmission": null,
-  "extensionduedate": null,
+  "extensionduedate": 0,
   "gradingstatus": "notgraded"
  },
  "warnings": []

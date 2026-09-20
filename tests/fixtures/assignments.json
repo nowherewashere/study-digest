@@ -66,7 +66,11 @@
        "name": "enabled",
        "value": "1"
       }
-     ]
+     ],
+     "nosubmissions": 0,
+     "teamsubmission": 0,
+     "maxattempts": -1,
+     "requiresubmissionstatement": 0
     },
     {
      "id": 12,
@@ -111,7 +115,11 @@
        "name": "enabled",
        "value": "0"
       }
-     ]
+     ],
+     "nosubmissions": 0,
+     "teamsubmission": 0,
+     "maxattempts": -1,
+     "requiresubmissionstatement": 0
     },
     {
      "id": 13,
@@ -120,11 +128,15 @@
      "name": "Сдать отчёт по домашней работе №1 \"Кодирование\"",
      "duedate": 1789160340,
      "allowsubmissionsfromdate": 0,
-     "cutoffdate": 0,
+     "cutoffdate": 1789160340,
      "submissiondrafts": 0,
      "intro": "<p>Сдать отчёт по домашней работе №1 \"Кодирование\"</p>",
      "introformat": 1,
-     "grade": 10
+     "grade": 10,
+     "nosubmissions": 0,
+     "teamsubmission": 0,
+     "maxattempts": -1,
+     "requiresubmissionstatement": 0
     },
     {
      "id": 14,
@@ -137,7 +149,11 @@
      "submissiondrafts": 0,
      "intro": "<p>Эссе (без срока)</p>",
      "introformat": 1,
-     "grade": 10
+     "grade": 10,
+     "nosubmissions": 0,
+     "teamsubmission": 0,
+     "maxattempts": -1,
+     "requiresubmissionstatement": 0
     },
     {
      "id": 15,
@@ -145,12 +161,16 @@
      "course": 1,
      "name": "Сдать отчет по лабораторной работе № 3. DHCP",
      "duedate": 1789678740,
-     "allowsubmissionsfromdate": 0,
+     "allowsubmissionsfromdate": 1789581600,
      "cutoffdate": 0,
      "submissiondrafts": 0,
      "intro": "<p>Сдать отчет по лабораторной работе № 3. DHCP</p>",
      "introformat": 1,
-     "grade": 10
+     "grade": 10,
+     "nosubmissions": 0,
+     "teamsubmission": 0,
+     "maxattempts": -1,
+     "requiresubmissionstatement": 0
     },
     {
      "id": 16,
@@ -163,7 +183,11 @@
      "submissiondrafts": 0,
      "intro": "<p>Сдать отчет по лабораторной работе № 4. NAT</p>",
      "introformat": 1,
-     "grade": 10
+     "grade": 10,
+     "nosubmissions": 0,
+     "teamsubmission": 0,
+     "maxattempts": -1,
+     "requiresubmissionstatement": 0
     },
     {
      "id": 17,
@@ -176,7 +200,11 @@
      "submissiondrafts": 0,
      "intro": "<p>Контрольная работа</p>",
      "introformat": 1,
-     "grade": 10
+     "grade": 10,
+     "nosubmissions": 0,
+     "teamsubmission": 0,
+     "maxattempts": -1,
+     "requiresubmissionstatement": 0
     },
     {
      "id": 18,
@@ -189,7 +217,11 @@
      "submissiondrafts": 0,
      "intro": "<p>Пересдача лабораторной работы № 2</p>",
      "introformat": 1,
-     "grade": 10
+     "grade": 10,
+     "nosubmissions": 0,
+     "teamsubmission": 0,
+     "maxattempts": -1,
+     "requiresubmissionstatement": 0
     },
     {
      "id": 19,
@@ -202,7 +234,11 @@
      "submissiondrafts": 0,
      "intro": "<p>Сдать отчет по лабораторной работе № 5. RIP</p>",
      "introformat": 1,
-     "grade": 10
+     "grade": 10,
+     "nosubmissions": 0,
+     "teamsubmission": 0,
+     "maxattempts": -1,
+     "requiresubmissionstatement": 0
     },
     {
      "id": 20,
@@ -215,7 +251,11 @@
      "submissiondrafts": 0,
      "intro": "<p>Пересдача лабораторной работы № 5</p>",
      "introformat": 1,
-     "grade": 10
+     "grade": 10,
+     "nosubmissions": 0,
+     "teamsubmission": 0,
+     "maxattempts": -1,
+     "requiresubmissionstatement": 0
     }
    ]
   },
@@ -267,7 +307,11 @@
        "name": "enabled",
        "value": "0"
       }
-     ]
+     ],
+     "nosubmissions": 0,
+     "teamsubmission": 1,
+     "maxattempts": -1,
+     "requiresubmissionstatement": 0
     }
    ]
   },
@@ -287,7 +331,11 @@
      "submissiondrafts": 0,
      "intro": "<p>Реферат</p>",
      "introformat": 1,
-     "grade": 10
+     "grade": 10,
+     "nosubmissions": 0,
+     "teamsubmission": 0,
+     "maxattempts": -1,
+     "requiresubmissionstatement": 0
     }
    ]
   }

@@ -8,7 +8,8 @@ import time
 from . import files, hosting, local, update
 from .config import Course, StudyError
 from .fmt import md_table, moment, parse_name, plain, short_name, weekday
-from .moodle import feedback_text, grade_of
+from . import moodle as moodle_api
+from .moodle import PENDING, submission_state
 from .snapshot import load_state, save_state
 
 # Что считаем новостью в core_course_get_updates_since; остальное (submissions, grades,
@@ -19,10 +20,7 @@ FILES = {"contentfiles", "files", "contents"}
 DATE_IDS = {"duedate", "timeclose"}
 KINDS = {"assign": "задание", "choice": "выбор темы",
          "workshop": "взаимная проверка", "feedback": "опрос"}
-SUBMISSION = {"new": "не сдано", "draft": "черновик", "reopened": "на доработку",
-              "submitted": "сдано", "hidden": "доступ закрыт"}
-# Состояния, при которых работа ещё ждёт ответа: не начато, черновик, вернули на доработку
-PENDING = {"new", "draft", "reopened"}
+SUBMISSION = {**moodle_api.SUBMISSION, "hidden": "доступ закрыт"}
 # Уведомления, которые Moodle шлёт сам: про наши же действия, про сроки (они уже в таблице)
 # и про входы в аккаунт. Отсев по eventtype, а не по теме: тема зависит от языка.
 AUTO_EVENTS = {"assign_due_soon", "assign_due_digest", "assign_notification", "newlogin"}
@@ -42,8 +40,9 @@ def soft(errors, where):
 
 
 def pending(a):
-    """Работа ещё ждёт ответа: не сдана, черновик, вернули на доработку или статус неизвестен."""
-    return a["submission"] in PENDING or a["submission"] is None
+    """Работа не сдана: ждёт ответа (не начато, черновик, на доработку), статус неизвестен
+    или ответа в ТУИС нет вовсе (очно) — в просроченное, но не в «Горит»: слать нечего."""
+    return a["submission"] in PENDING or a["submission"] in (None, "offline")
 
 
 def news(course, m, section, what):
@@ -82,6 +81,7 @@ class Collector:
         self.courses = {c.id: c for c in cfg.track(moodle.courses())}
         self.ignore = cfg.ignore()   # решение пользователя: этих курсов в сводке нет вовсе
         self.assigns = {}       # id задания → строка сводки (для снимка)
+        self.raw = {}           # id задания → сырое задание из mod_assign_get_assignments
         self.asked = set()      # задания, чей статус уже запрошен
         self.soon, self.overdue = [], []
         self._contents = {}
@@ -118,8 +118,11 @@ class Collector:
                         "cmid": a["cmid"], "course": self.course(c["id"]), "name": a["name"],
                         "short": short_name(a["name"]), "due": moment(a.get("duedate"), self.now),
                         "submission": None, "intro": plain(a.get("intro")),
-                        "lab": lab_number(a["name"]), "retake": lab_number(a["name"], "retake")}
+                        "lab": lab_number(a["name"]), "retake": lab_number(a["name"], "retake"),
+                        "graded": False, "closed": False, "opens": None, "canedit": None,
+                        "locked": False}
                 self.assigns[str(a["id"])] = item
+                self.raw[a["id"]] = a
                 due = a.get("duedate") or 0
                 prev = self.known.get(str(a["id"]))
                 # пересдача — не новость: новостью была сама лаба
@@ -139,6 +142,9 @@ class Collector:
             if not item["retake"]:
                 self.status(item)
         self.retakes([a for a in live if a["retake"]])
+        # продление срока преподавателем могло вывести работу из просроченного — пересобрать
+        self.soon = [a for a in live if self.within(a["due"]["ts"])]
+        self.overdue = [a for a in live if not self.within(a["due"]["ts"])]
         return new, moved
 
     def status(self, item):
@@ -148,13 +154,13 @@ class Collector:
         self.asked.add(item["assign_id"])
         with self.soft(f"статус задания {item['assign_id']}"):
             st = self.moodle.submission_status(item["assign_id"])
-            sub = (st.get("lastattempt") or {}).get("submission") or {}
-            item["submission"] = sub.get("status") or "new"
-            item["grade"] = grade_of(st)   # -1 (отзыв без оценки) — не оценка
-            # Очная защита может быть оценена без загрузки файла: Moodle оставляет status="new".
-            if item["grade"] is not None and item["submission"] == "new":
-                item["submission"] = "submitted"
-            item["feedback"] = feedback_text(st)
+            s = submission_state(self.raw[item["assign_id"]], st, self.now)
+            item.update(submission=s["status"], grade=s["grade"], feedback=s["feedback"],
+                        graded=s["graded"], closed=s["closed"], canedit=s["canedit"],
+                        locked=s["locked"],
+                        opens=moment(s["opens"], self.now) if s["opens"] else None)
+            if s["due"] and s["due"] != item["due"]["ts"]:
+                item["due"] = moment(s["due"], self.now)   # индивидуальное продление срока
             item["feedback_new"] = bool(item["feedback"]) and self.fb is not None \
                 and self.fb.get(str(item["assign_id"])) != item["feedback"]
 
@@ -168,8 +174,9 @@ class Collector:
             if orig:
                 self.status(orig)   # оригинал может быть старше окна — статус ещё не брали
             r["needed"] = orig is None or (orig["submission"] != "submitted"
-                                           and orig.get("grade") is None
-                                           and (not orig["due"] or orig["due"]["overdue"]))
+                                           and not orig.get("graded")
+                                           and (not orig["due"] or orig["due"]["overdue"]
+                                                or orig.get("closed")))
             if r["needed"] and r["source"] == "assign_api":
                 self.status(r)
 
@@ -382,9 +389,11 @@ class Collector:
             "deadlines": deadlines,
             "overdue": [a for a in overdue if pending(a)],
             "submitted": [a for a in overdue if not pending(a)],
-            # просроченное и несданное — впереди: пересдача всё ещё стоит баллов
+            # просроченное и несданное — впереди: пересдача всё ещё стоит баллов; но не то,
+            # что ТУИС уже не примет (приём закрыт) — туда ведёт задание «Пересдача»
             "not_started": [a for a in overdue + deadlines
-                            if a["source"] == "assign_api" and a["submission"] in PENDING],
+                            if a["source"] == "assign_api" and a["submission"] in PENDING
+                            and not a.get("closed")],
             # отзывы преподавателя, которых в снимке ещё не было
             "feedback": [a for a in by_due(self.soon + self.overdue) if a.get("feedback_new")],
             "retakes": [{"assign_id": a.get("assign_id"), "cmid": a["cmid"], "short": a["short"],
@@ -403,7 +412,8 @@ class Collector:
         """Что запомнить до следующего запуска."""
         return {
             "last_run": self.now,
-            "assignments": {i: (a["due"]["ts"] if a["due"] else 0)
+            # исходный срок, не продлённый: иначе продление даст «срок сдвинут» каждый день
+            "assignments": {i: self.raw[a["assign_id"]].get("duedate") or 0
                             for i, a in self.assigns.items()},
             "courses": {str(c.id): c.title for c in self.courses.values()},
             "grades": {str(g["course"]["id"]): {i["name"]: i["raw"] for i in g["items"]}
@@ -456,6 +466,10 @@ def status_of(a):
     if a["submission"] is None:
         # статус не получен (ошибка в errors) или элемент без ответа: опрос, взаимная проверка
         return KINDS.get(a.get("modname"), "?") if a["kind"] == "activity" else "?"
+    if a.get("opens"):
+        return "откроется " + a["opens"]["text"]
+    if a.get("closed"):
+        return "заблокировано" if a.get("locked") else "приём закрыт"
     if a["submission"] == "reopened" and a.get("feedback"):
         return "на доработку: " + plain(a["feedback"], 60)
     return SUBMISSION.get(a["submission"], a["submission"])

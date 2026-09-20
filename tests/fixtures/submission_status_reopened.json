@@ -14,7 +14,10 @@
   "graded": true,
   "canedit": true,
   "cansubmit": true,
-  "blindmarking": false
+  "blindmarking": false,
+  "teamsubmission": null,
+  "extensionduedate": null,
+  "gradingstatus": "graded"
  },
  "feedback": {
   "grade": {
