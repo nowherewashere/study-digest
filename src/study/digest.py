@@ -151,6 +151,9 @@ class Collector:
             sub = (st.get("lastattempt") or {}).get("submission") or {}
             item["submission"] = sub.get("status") or "new"
             item["grade"] = ((st.get("feedback") or {}).get("grade") or {}).get("grade")
+            # Очная защита может быть оценена без загрузки файла: Moodle оставляет status="new".
+            if item["grade"] is not None and item["submission"] == "new":
+                item["submission"] = "submitted"
             item["feedback"] = feedback_text(st)
             item["feedback_new"] = bool(item["feedback"]) and self.fb is not None \
                 and self.fb.get(str(item["assign_id"])) != item["feedback"]
