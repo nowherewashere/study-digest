@@ -42,6 +42,10 @@ class TimeTest(unittest.TestCase):
         self.assertEqual((m["ts"], m["left"], m["left_sec"], m["overdue"]),
                          (1_000_000, "1 дн", fmt.DAY, False))
         self.assertTrue(fmt.moment(1_000_010, now=1_000_020)["overdue"])   # <0 на Windows нельзя
+        # ts=1 даёт --since all; на Windows astimezone() naive-времени первых часов эпохи
+        # падал OSError 22 (#1) — CI на windows-latest это поймает
+        self.assertEqual(fmt.moment(1)["ts"], 1)
+        self.assertTrue(fmt.moment(1)["iso"].startswith("1970-01-01T"))
 
 
 class TablesTest(unittest.TestCase):
