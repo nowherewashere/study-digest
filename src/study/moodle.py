@@ -153,7 +153,8 @@ class Moodle:
         return last
 
     def save_submission(self, assignid, text, itemid=None):
-        """Отправка ответа. Необратима: у заданий submissiondrafts=0, черновиков нет."""
+        """Сохранение ответа: при submissiondrafts=0 это и есть сдача (необратимо),
+        при 1 — черновик, который сдаёт submit_for_grading."""
         params = {"assignmentid": assignid}
         if text is not None:
             params.update({"plugindata[onlinetext_editor][text]": text,
@@ -162,7 +163,26 @@ class Moodle:
                            "plugindata[onlinetext_editor][itemid]": 0})
         if itemid:
             params["plugindata[files_filemanager]"] = itemid
-        return self.call("mod_assign_save_submission", **params)
+        return warned(self.call("mod_assign_save_submission", **params),
+                      "mod_assign_save_submission")
+
+    def submit_for_grading(self, assignid, statement=False):
+        """Сдача черновика (submissiondrafts=1); acceptsubmissionstatement — PARAM_BOOL, слать
+        1/0, при requiresubmissionstatement=1 без единицы Moodle вернёт warning."""
+        return warned(self.call("mod_assign_submit_for_grading", assignmentid=assignid,
+                                acceptsubmissionstatement=1 if statement else 0),
+                      "mod_assign_submit_for_grading")
+
+
+def warned(out, fn):
+    """Ручки записи mod_assign не бросают exception: отказ приходит как HTTP 200 и список
+    [{item, itemid, warningcode, message}], где причина — в item («The due date for this
+    assignment has now passed», «Nothing was submitted»), а message общий. Пусто — успех."""
+    if isinstance(out, list) and out:
+        raise StudyError("moodle", "; ".join(plain(w.get("item")) or w.get("message", "")
+                                             for w in out),
+                         code=out[0].get("warningcode"), where=fn)
+    return out
 
 
 # --- ответ преподавателя
@@ -275,6 +295,24 @@ def check_submission(acc, text, paths, itemid=None):
             out.append(f"{p.name}: тип {p.suffix.lower() or 'без расширения'} "
                        f"не из списка {', '.join(f['types'])}")
     return out
+
+
+def check_state(s, when):
+    """Что мешает отправке по состоянию ответа (submission_state); `when(ts)` — как печатать
+    время. Смотрит canedit, а не closed: отказать надо и при «сдано, правка закрыта»."""
+    if s["status"] == "offline":
+        return ["у задания нет ответа в ТУИС (очная сдача) — отправлять нечего"]
+    if s["opens"]:
+        return [f"приём откроется {when(s['opens'])}"]
+    if s["canedit"] is False:
+        why = ("заблокировано преподавателем" if s["locked"]
+               else f"уже оценено ({s['grade']})" if s["graded"]
+               else "ответ уже отправлен на проверку, правка закрыта"
+               if s["status"] == "submitted"
+               else f"приём закрыт {when(s['cutoff'])}" if s["cutoff"]
+               else "приём закрыт (canedit=false)")
+        return [why + " — нужна «Пересдача …» или разрешение преподавателя"]
+    return []
 
 
 def accepts_line(acc):

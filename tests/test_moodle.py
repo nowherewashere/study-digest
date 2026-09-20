@@ -1,9 +1,10 @@
 import argparse
 import unittest
 
-from study import cli, net
+from study import cli, fmt, net
 from study.config import StudyError
-from study.moodle import PAGE, Moodle, accepts, accepts_line, check_submission, grade_of
+from study.moodle import (PAGE, Moodle, accepts, accepts_line, check_submission, grade_of,
+                          submission_state)
 from tests.fakes import FakeNet, config, fixture, tmpdir
 
 SERVER = "https://tuis.example/webservice/rest/server.php"
@@ -245,12 +246,25 @@ class SubmitTest(unittest.TestCase):
         self.cfg = config(self.tmp)
         self.pdf = self.tmp / "report.pdf"
         self.pdf.write_bytes(b"%PDF" * 300)
-        self.net.reply("POST", "mod_assign_get_assignments", fixture("assignments"))
 
-    def submit(self, **kw):
+    def submit(self, status="new", assignments=None, **kw):
+        """Один вызов cmd_submit: ответы на задания и статус ставятся на каждый вызов."""
         args = argparse.Namespace(assign_id=11, text=None, attach=None, files=None, confirm=False)
         vars(args).update(kw)
+        self.net.drop("mod_assign_get_assignments")
+        self.net.reply("POST", "mod_assign_get_assignments", assignments or fixture("assignments"))
+        st = fixture(f"submission_status_{status}") if isinstance(status, str) else status
+        self.net.reply("POST", ("mod_assign_get_submission_status", f"assignid={args.assign_id}"),
+                       st)
         return cli.cmd_submit(self.cfg, args)
+
+    def assignment(self, aid, **patch):
+        d = fixture("assignments")
+        for c in d["courses"]:
+            for a in c["assignments"]:
+                if a["id"] == aid:
+                    a.update(patch)
+        return d
 
     def test_plan(self):
         plan, text, rc = self.submit(attach=[str(self.pdf)])
@@ -259,6 +273,8 @@ class SubmitTest(unittest.TestCase):
         self.assertIn("принимает: текст — да, до 500 слов · файлы — до 2, типы .pdf, до 10 МБ",
                       text)
         self.assertIn("вложения: report.pdf (1 КБ)", text)
+        self.assertIn("состояние: не сдано\n", text)
+        self.assertIn("после сохранения: сразу сдача (submissiondrafts=0)", text)
         self.assertIn("Повтори с --confirm", text)
         self.assertEqual(self.net.calls("mod_assign_save_submission"), [])
 
@@ -288,3 +304,85 @@ class SubmitTest(unittest.TestCase):
         self.assertEqual((rc, plan["problems"]),
                          (1, ["текст ответа в задании выключен — только файлы"]))
         self.assertIn("вложения: itemid 77 (состав по itemid не виден, не проверяется)", text)
+
+    def test_closed_locked_graded_opens_offline(self):
+        # приём закрыт: cutoff = срок (13), canedit false
+        plan, text, rc = self.submit(assign_id=13, status="closed", attach=[str(self.pdf)])
+        why = (f"приём закрыт {fmt.moment(1789160340)['full']} — нужна «Пересдача …» или "
+               "разрешение преподавателя")
+        self.assertEqual((rc, plan["problems"]), (1, [why]))
+        self.assertEqual(self.net.calls("mod_assign_save_submission"), [])
+        st = fixture("submission_status_new")
+        st["lastattempt"].update({"locked": True, "canedit": False})
+        plan, _, _ = self.submit(status=st, attach=[str(self.pdf)], confirm=True)
+        self.assertEqual(plan["problems"][0][:29], "заблокировано преподавателем ")
+        plan, text, _ = self.submit(assign_id=12, status="submitted", attach=[str(self.pdf)])
+        self.assertEqual(plan["problems"][0][:22], "уже оценено (9.50000) ")
+        self.assertIn("состояние: сдано — отправка заменит прежний ответ", text)
+        later = self.assignment(11, allowsubmissionsfromdate=4102444800)
+        plan, _, _ = self.submit(assignments=later, attach=[str(self.pdf)])
+        self.assertEqual(plan["problems"], [f"приём откроется {fmt.moment(4102444800)['full']}"])
+        st = fixture("submission_status_new")
+        st["lastattempt"]["submissionsenabled"] = False
+        plan, _, _ = self.submit(status=st, attach=[str(self.pdf)])
+        self.assertEqual(plan["problems"],
+                         ["у задания нет ответа в ТУИС (очная сдача) — отправлять нечего"])
+        self.assertEqual(self.net.calls("mod_assign_save_submission"), [])
+
+    def test_drafts_submit_for_grading(self):
+        self.net.reply("POST", "/webservice/upload.php", [{"itemid": 77, "filename": "report.pdf"}])
+        self.net.reply("POST", "mod_assign_save_submission", [])
+        self.net.reply("POST", "mod_assign_submit_for_grading", [])
+        plan, text = self.submit(assignments=self.assignment(11, submissiondrafts=1,
+                                                             requiresubmissionstatement=1),
+                                 attach=[str(self.pdf)], confirm=True)
+        self.assertEqual((plan["drafts"], plan["statement"], plan["submitted"]), (True, True, []))
+        form = self.net.calls("mod_assign_submit_for_grading")[0]
+        self.assertEqual((form["assignmentid"], form["acceptsubmissionstatement"]), ("11", "1"))
+        self.assertEqual(self.net.sent[-1]["retries"], 0)   # необратимо — без повторов
+        self.assertTrue(text.startswith("Отправлено"))
+        _, text, _ = self.submit(assignments=self.assignment(11, submissiondrafts=1),
+                                 attach=[str(self.pdf)])
+        self.assertIn("после сохранения: отправка на проверку (submissiondrafts=1)\n", text)
+
+    def test_warning_is_error(self):
+        # отказ Moodle приходит как HTTP 200 и warnings — «Отправлено» печатать нельзя
+        self.net.reply("POST", "/webservice/upload.php", [{"itemid": 77, "filename": "report.pdf"}])
+        self.net.reply("POST", "mod_assign_save_submission",
+                       [{"item": "The due date for this assignment has now passed", "itemid": 11,
+                         "warningcode": "couldnotsavesubmission",
+                         "message": "Could not save submission."}])
+        with self.assertRaises(StudyError) as e:
+            self.submit(attach=[str(self.pdf)], confirm=True)
+        self.assertEqual((e.exception.code, e.exception.where),
+                         ("couldnotsavesubmission", "mod_assign_save_submission"))
+        self.assertIn("The due date for this assignment has now passed", e.exception.message)
+        self.assertEqual(self.net.calls("mod_assign_submit_for_grading"), [])
+
+
+class SubmissionStateTest(unittest.TestCase):
+    def test_rules(self):
+        new, now = fixture("submission_status_new"), 1789538400
+        a = {"duedate": now - 100, "cutoffdate": now - 100, "allowsubmissionsfromdate": 0}
+        s = submission_state(a, new, now)
+        self.assertEqual((s["status"], s["closed"], s["graded"], s["due"], s["cutoff"]),
+                         ("new", False, False, now - 100, now - 100))   # canedit true — открыто
+        s = submission_state(a, fixture("submission_status_closed"), now)
+        self.assertEqual((s["status"], s["closed"], s["canedit"]), ("new", True, False))
+        s = submission_state({**a, "teamsubmission": 1}, fixture("submission_status_team"), now)
+        self.assertEqual((s["status"], s["team"], s["closed"]), ("submitted", True, False))
+        s = submission_state({**a, "nosubmissions": 1}, new, now)
+        self.assertEqual((s["status"], s["closed"]), ("offline", False))
+        graded = fixture("submission_status_submitted")
+        graded["lastattempt"]["submission"]["status"] = "new"   # очная защита оценена без файла
+        s = submission_state({**a, "nosubmissions": 1}, graded, now)
+        self.assertEqual((s["status"], s["graded"], s["grade"]), ("submitted", True, "9.50000"))
+        ext = fixture("submission_status_closed")
+        ext["lastattempt"].update({"extensionduedate": now + 500, "canedit": True})
+        s = submission_state(a, ext, now)
+        self.assertEqual((s["due"], s["cutoff"], s["closed"]), (now + 500, now + 500, False))
+        s = submission_state({**a, "allowsubmissionsfromdate": now + 9}, ext, now)
+        self.assertEqual(s["opens"], now + 9)
+        s = submission_state({}, {}, now)   # статус не получен: ничего не утверждаем
+        self.assertEqual((s["status"], s["canedit"], s["closed"], s["due"]),
+                         ("new", None, False, None))

@@ -12,7 +12,8 @@ import time
 from . import agent, answer, courses, digest, files, hosting, local, setup, task, update
 from .config import Config, Course, StudyError
 from .fmt import moment, plain, table
-from .moodle import Moodle, accepts, accepts_line, check_submission, mb
+from .moodle import (SUBMISSION, Moodle, accepts, accepts_line, check_state, check_submission,
+                     mb, submission_state)
 from .rutube import DEFAULT_CATEGORY, Rutube
 
 
@@ -183,9 +184,14 @@ def cmd_submit(cfg, args):
     found = next((a for c in course_list for a in c["assignments"]
                   if a["id"] == args.assign_id), None)
     acc = accepts(found) if found else None
-    problems = check_submission(acc, text, attach, args.files)
+    state = submission_state(found or {}, m.submission_status(args.assign_id), int(time.time()))
+    problems = check_submission(acc, text, attach, args.files) + check_state(
+        state, lambda ts: moment(ts)["full"])
+    drafts = bool(found and found.get("submissiondrafts") == 1)
+    statement = bool(found and found.get("requiresubmissionstatement") == 1)
     plan = {"assign_id": args.assign_id, "name": found["name"] if found else None,
-            "due": moment(found.get("duedate")) if found else None, "accepts": acc,
+            "due": moment(state["due"]), "accepts": acc, "state": state,
+            "drafts": drafts, "statement": statement,
             "text_file": args.text, "text_chars": len(text or ""),
             "attach": [{"name": p.name, "bytes": p.stat().st_size if p.is_file() else None}
                        for p in attach],
@@ -201,19 +207,25 @@ def cmd_submit(cfg, args):
              "  задание: {} (id {})".format(plan["name"] or "?", args.assign_id),
              "  срок: {}".format(plan["due"]["full"] if plan["due"] else "—"),
              "  принимает: " + accepts_line(acc),
+             "  состояние: " + SUBMISSION.get(state["status"], state["status"])
+             + (" — отправка заменит прежний ответ" if state["status"] == "submitted" else ""),
              "  текст: " + (f"{args.text} ({len(text)} символов), формат Markdown"
                             if text is not None else "нет"),
-             "  вложения: " + vl]
+             "  вложения: " + vl,
+             "  после сохранения: " + (("отправка на проверку (submissiondrafts=1)"
+                                        + (", с подтверждением авторства" if statement else ""))
+                                       if drafts else "сразу сдача (submissiondrafts=0)")]
     if problems:
         lines += ["", "Нельзя отправить:"] + [f"  – {x}" for x in problems]
         return plan, "\n".join(lines), 1
     if not args.confirm:
-        lines += ["", ("Отправка необратима: у заданий курса submissiondrafts=0, черновика "
-                       "не будет. Повтори с --confirm.")]
+        lines += ["", "Отправка необратима: черновика не останется. Повтори с --confirm."]
         return plan, "\n".join(lines), 1
     itemid = m.upload(attach, args.files or 0) if attach else args.files
     plan["files_itemid"] = itemid
-    plan["result"] = m.save_submission(args.assign_id, text, itemid)
+    plan["result"] = m.save_submission(args.assign_id, text, itemid)   # отказ — StudyError
+    if drafts:
+        plan["submitted"] = m.submit_for_grading(args.assign_id, statement)
     return plan, "Отправлено: {} (id {})".format(plan["name"] or "?", args.assign_id)
 
 
