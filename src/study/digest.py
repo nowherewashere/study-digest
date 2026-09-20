@@ -263,8 +263,8 @@ class Collector:
                                      "новые файлы" if kinds & FILES else "изменены настройки")
             # имена файлов — чтобы сводка говорила «появился 002-dns.pdf», а не «новые файлы»
             for mid, (m, section) in modules.items():
-                new_files = [files.safe(c["filename"]) for c in m.get("contents") or []
-                             if files.is_file(c) and c.get("filesize")
+                new_files = [files.label(c) for c in m.get("contents") or []
+                             if ((files.is_file(c) and c.get("filesize")) or files.is_link(c))
                              and files.fresh(m, c, self.since, known)]
                 if new_files:
                     rows.setdefault(mid, news(course, m, section, "новые файлы"))

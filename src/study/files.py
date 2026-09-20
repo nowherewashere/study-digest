@@ -56,10 +56,21 @@ def is_file(content):
     return content.get("type") == "file" and bool(content.get("fileurl"))
 
 
+def is_link(content):
+    """Ссылка (mod_url): скачивать нечего, но появление стоит заметить."""
+    return content.get("type") == "url" and bool(content.get("fileurl"))
+
+
+def label(content):
+    """Имя в списках: файл — как на диске, ссылка — «Название → URL» (URL не чистим)."""
+    name = safe(content.get("filename"))
+    return f"{name} → {content['fileurl']}" if is_link(content) else name
+
+
 def keys(contents):
-    """Все файлы состава курса — что запомнить в снимке."""
+    """Все файлы и ссылки состава курса — что запомнить в снимке."""
     return sorted(key(m, c) for sec in contents for m in sec.get("modules", [])
-                  for c in m.get("contents") or [] if is_file(c))
+                  for c in m.get("contents") or [] if is_file(c) or is_link(c))
 
 
 def fresh(module, content, since, known):
@@ -81,6 +92,15 @@ def listing(cfg, moodle, course, since=None, everything=False):
     for sec in moodle.contents(course.id):
         for m in sec.get("modules", []):
             for c in m.get("contents") or []:
+                if is_link(c):
+                    item = {"name": label(c), "size": 0, "ext": "",
+                            "modified": moment(c.get("timemodified")), "url": c["fileurl"],
+                            "section": sec.get("name"), "module": m.get("name"),
+                            "modname": m.get("modname"), "path": None, "have": False,
+                            "newer": False, "new": fresh(m, c, since, known), "skip": "ссылка"}
+                    if everything or item["new"]:
+                        out.append(item)
+                    continue
                 if not is_file(c):
                     continue
                 name = safe(c.get("filename"))

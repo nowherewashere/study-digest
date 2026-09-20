@@ -35,17 +35,21 @@ class FilesTest(unittest.TestCase):
                          {"002-dns.pdf": (None, False, True),
                           "video.mp4": ("тип .mp4", False, True),
                           "big.zip": ("размер 60 МБ", False, True),
+                          "Ссылка → https://example.org/": ("ссылка", False, True),
                           "lecture-01.pptx": (None, True, False),
                           "index.html": ("страница курса", False, False)})
+        self.assertIsNone(rows["Ссылка → https://example.org/"]["path"])
         self.assertEqual(rows["lecture-01.pptx"]["path"],
                          str(self.stash / "old" / "lecture-01.pptx"))
         self.assertEqual(rows["002-dns.pdf"]["path"], str(self.stash / "002-dns.pdf"))
         self.assertEqual((rows["002-dns.pdf"]["section"], rows["002-dns.pdf"]["module"]),
                          ("Лабораторные работы", "Методичка 2"))
-        self.assertNotIn("Ссылка", rows)   # type=url — не файл
         new = files.listing(self.cfg, self.m, self.course, since=SINCE)
-        self.assertEqual([f["name"] for f in new["files"]], ["002-dns.pdf", "video.mp4", "big.zip"])
-        self.assertIn("Забрать: study files nettech --pull", files.render(new))
+        self.assertEqual([f["name"] for f in new["files"]],
+                         ["002-dns.pdf", "video.mp4", "big.zip", "Ссылка → https://example.org/"])
+        text = files.render(new)
+        self.assertIn("Забрать: study files nettech --pull", text)
+        self.assertIn("пропущен: ссылка Ссылка → https://example.org/", text)
 
     def test_listing_by_snapshot(self):
         # старый файл, которого не было при прошлой сводке, — новый, дата не в счёт
@@ -55,13 +59,14 @@ class FilesTest(unittest.TestCase):
         d = files.listing(self.cfg, self.m, self.course)
         self.assertTrue(d["tracked"])
         self.assertEqual([f["name"] for f in d["files"]],
-                         ["002-dns.pdf", "video.mp4", "big.zip", "lecture-01.pptx", "index.html"])
+                         ["002-dns.pdf", "video.mp4", "big.zip", "Ссылка → https://example.org/",
+                          "lecture-01.pptx", "index.html"])
         self.assertIn("чего не было при прошлой сводке", files.render(d))
 
     def test_listing_since_from_state(self):
         d = files.listing(self.cfg, self.m, self.course)   # снимка нет — новым считается всё
         self.assertIsNone(d["since"])
-        self.assertEqual(len(d["files"]), 5)
+        self.assertEqual(len(d["files"]), 6)
         self.assertIn("после начала времён", files.render(d))
         with self.assertRaises(StudyError):
             files.stash(Course(2))
