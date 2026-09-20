@@ -192,12 +192,24 @@ class AnswerTest(unittest.TestCase):
         self.assertIn("PDF не собраны", answer.render(
             {**d, "attachments": []}))
 
-    def test_homework_and_errors(self):
-        d = answer.build(self.cfg, "nettech", "hw1")
-        self.assertEqual(d["created"], str(self.tmp / "nettech/tuis/hw01.env"))
+    def test_errors(self):
+        with self.assertRaises(StudyError) as e:
+            answer.build(self.cfg, "nettech", "hw1")   # домашних нет: только labNN
+        self.assertIn("ожидается номер лабораторной", e.exception.message)
         with self.assertRaises(StudyError) as e:
             answer.build(self.cfg, "nettech", "2")
         self.assertIn(str(self.repo / "labs" / "lab02"), e.exception.message)
         with self.assertRaises(StudyError) as e:
-            answer.build(self.cfg, "nope", "1")
+            answer.build(self.cfg, "nope", "1")   # репозитория нет → профиль file
+        self.assertIn("nope сдаётся файлом (FLOW file): study submit <id> --attach nope/lab01/",
+                      e.exception.message)
+        # явный FLOW release без клона — прежняя ошибка про репозиторий
+        cfg = config(self.tmp, "CODE 7 nope\nFLOW 7 release\n")
+        with self.assertRaises(StudyError) as e:
+            answer.build(cfg, "nope", "1")
         self.assertIn("не найден репозиторий", e.exception.message)
+        # явный FLOW file при живом репозитории — answer не нужен
+        cfg = config(self.tmp, "CODE 1 nettech\nFLOW 1 file\n")
+        with self.assertRaises(StudyError) as e:
+            answer.build(cfg, "nettech", "1")
+        self.assertIn("FLOW file", e.exception.message)

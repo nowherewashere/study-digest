@@ -352,7 +352,7 @@ class StateTest(DigestCase):
         d = digest.state(self.cfg, None, with_tuis=False)
         self.assertIsNone(d["tuis"])
         c = d["courses"][0]
-        self.assertEqual(c["dir"], str(self.tmp / "nettech"))
+        self.assertEqual((c["dir"], c["flow"]), (str(self.tmp / "nettech"), "release"))
         self.assertEqual((c["code"], c["repo"]["branch"], c["repo"]["last_tag"],
                           c["repo"]["dirty"]), ("nettech", "master", "v1.1.0", ["?? labs/"]))
         self.assertEqual(c["repo"]["remotes"],
@@ -367,6 +367,15 @@ class StateTest(DigestCase):
         self.assertIn("ТУИС не опрашивался", text)
         self.assertIn("nettech: незакоммичено 1, нет релиза на gitverse (v1.1.0), "
                       "релиз v1.1.0 на sourcecraft без файлов.", text)
+
+    def test_file_flow_skips_repo_and_hostings(self):
+        # у file-курса репозиторий в папке не смотрится: ни git, ни хостингов (ответов нет)
+        cfg = config(self.tmp, "COURSE_IGNORE=4\nCODE 1 nettech\nFLOW 1 file\n")
+        d = digest.state(cfg, None, with_tuis=False)
+        c = d["courses"][0]
+        self.assertEqual((c["flow"], c["repo"], c["releases"], c["labs"]), ("file", None, {}, []))
+        self.assertEqual(d["errors"], [])
+        self.assertNotIn("nettech:", digest.render(d))
 
     def test_with_tuis_and_pull(self):
         self.cfg.state_file().write_text(json.dumps(STATE), encoding="utf-8")

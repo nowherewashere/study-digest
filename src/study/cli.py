@@ -433,9 +433,10 @@ def tuis_parsers(sub):
     s.add_argument("--no-save", action="store_true", help="не обновлять снимок состояния")
     s.add_argument("--since", **SINCE)
 
-    s = add(sub, "answer", "заготовка ответа в ТУИС по лабораторной работе", cmd_answer)
+    s = add(sub, "answer", "заготовка ответа в ТУИС по лабораторной (курсы с FLOW release)",
+            cmd_answer)
     s.add_argument("code", help="код предмета, каталог в ~/work/study")
-    s.add_argument("num", help="номер лабораторной работы (hwNN — домашней)")
+    s.add_argument("num", help="номер лабораторной работы (NN)")
     s.add_argument("--tag", help="тег релиза; по умолчанию последний")
 
     s = add(sub, "update", "обновить study из репозитория и блоки агента", cmd_update)

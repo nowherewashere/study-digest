@@ -17,10 +17,12 @@ class LocalTest(unittest.TestCase):
                     "git@github.com:owner/repo.git", "https://github.com/owner/repo", ""):
             self.assertEqual(local.repo_slug(url), "owner/repo" if url else "")
 
-    def test_work_id(self):
-        self.assertEqual(local.work_id("1"), ("lab", "01"))
-        self.assertEqual(local.work_id("lab02"), ("lab", "02"))
-        self.assertEqual(local.work_id(" HW3 "), ("hw", "03"))
+    def test_lab_id(self):
+        self.assertEqual(local.lab_id("1"), "01")
+        self.assertEqual(local.lab_id(" LAB02 "), "02")
+        for bad in ("hw1", "123", "x", ""):   # домашних у study answer нет: только labNN
+            with self.assertRaises(StudyError):
+                local.lab_id(bad)
 
     def test_video_keys(self):
         self.assertEqual(local.VIDEO_KEYS[:2], ["RUTUBE_PLAYLIST", "RUTUBE_LAB"])

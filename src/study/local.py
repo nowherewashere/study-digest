@@ -7,13 +7,13 @@ import sys
 
 from .config import ROOT, StudyError
 
-# Ссылки на скринкасты в <код>/tuis/labNN.env: плейлист и четыре записи на двух площадках.
+# Регламент профиля release (см. FLOW в config.env): лабы в labs/labNN репозитория курса,
+# ссылки на скринкасты в <код>/tuis/labNN.env — плейлист и четыре записи на двух площадках.
 SITES = {"RUTUBE": "Rutube", "VK": "VKvideo"}
 SLOTS = {"LAB": "Выполнение лабораторной работы", "REPORT": "Подготовка отчёта",
          "PRESENTATION": "Подготовка презентации", "DEFENSE": "Защита лабораторной работы"}
 VIDEO_KEYS = [f"{site}_{slot}" for site in SITES for slot in ["PLAYLIST", *SLOTS]]
-# Каталоги работ в репозитории курса: labs/labNN и homework/hwNN.
-WORK_DIRS = {"lab": "labs", "hw": "homework"}
+LABS_DIR = "labs"
 
 
 def run(path, *args, timeout=None):
@@ -87,16 +87,17 @@ def tuis_dir(code):
     return ROOT / code / "tuis"
 
 
-def work_id(num):
-    """'01' → ('lab', '01'); 'hw1' → ('hw', '01')."""
-    num = str(num).strip().lower()
-    kind = "hw" if num.startswith("hw") else "lab"
-    return kind, re.sub(r"^(hw|lab)", "", num).zfill(2)
+def lab_id(num):
+    """Номер лабы как в каталоге: '1', '01', 'lab1' → '01'; не номер — StudyError."""
+    m = re.fullmatch(r"(?:lab)?(\d{1,2})", str(num).strip().lower())
+    if not m:
+        raise StudyError("local", f"ожидается номер лабораторной (NN), а не «{num}»")
+    return m.group(1).zfill(2)
 
 
-def videos(code, num, kind="lab"):
-    """Состояние <код>/tuis/<kind>NN.env — ссылок на скринкасты."""
-    f = tuis_dir(code) / f"{kind}{num}.env"
+def videos(code, num):
+    """Состояние <код>/tuis/labNN.env — ссылок на скринкасты."""
+    f = tuis_dir(code) / f"lab{num}.env"
     if not f.exists():
         return {"path": str(f), "exists": False, "filled": 0, "total": len(VIDEO_KEYS),
                 "missing": list(VIDEO_KEYS), "values": {}}
@@ -113,7 +114,7 @@ def videos(code, num, kind="lab"):
 def labs(repo, code):
     """Лабы репозитория: исходники, собранные файлы, ссылки на записи, заготовка ответа."""
     out = []
-    for lab in sorted((repo / WORK_DIRS["lab"]).glob("lab*")):
+    for lab in sorted((repo / LABS_DIR).glob("lab*")):
         item = {"num": lab.name[3:], "path": str(lab)}
         for kind in ("report", "presentation"):
             pdfs = sorted((lab / kind).glob("_output/*.pdf"))

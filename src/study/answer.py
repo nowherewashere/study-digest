@@ -1,4 +1,4 @@
-"""Заготовка ответа в ТУИС по лабораторной работе.
+"""Заготовка ответа в ТУИС по лабораторной работе — только у курсов с профилем release.
 
 Собирает текст по чек-листу преподавателя: скринкасты из `<код>/tuis/labNN.env`,
 репозитории и релизы — из git-remote и последнего тега. Ничего не отправляет.
@@ -15,15 +15,19 @@ TEMPLATE = ("# Ссылки на скринкасты для ответа в Т�
 
 def build(cfg, code, num, tag=None):
     """Текст ответа и список вложений. Нет labNN.env — создаётся пустой."""
-    kind, num = local.work_id(num)
+    num = local.lab_id(num)
+    if local.flow_of(cfg, code) != "release":
+        raise StudyError("local", f"{code} сдаётся файлом (FLOW file): "
+                                  f"study submit <id> --attach {code}/lab{num}/…/_output/*.pdf; "
+                                  "study answer здесь не нужен")
     repo = local.course_repo(code)
     if not repo:
         raise StudyError("local", f"не найден репозиторий курса в {ROOT / code}")
-    lab = repo / local.WORK_DIRS[kind] / f"{kind}{num}"
+    lab = repo / local.LABS_DIR / f"lab{num}"
     if not lab.is_dir():
         raise StudyError("local", f"нет каталога {lab}")
 
-    v = local.videos(code, num, kind)
+    v = local.videos(code, num)
     if not v["exists"]:
         env = pathlib.Path(v["path"])
         env.parent.mkdir(parents=True, exist_ok=True)
@@ -51,7 +55,7 @@ def build(cfg, code, num, tag=None):
             body.append(f"  - [{cls.source}]({h.repo_url()}), [релиз {tag}]({h.web_url(tag)})")
     text = "\n".join(body) + "\n"
 
-    out = local.tuis_dir(code) / f"{kind}{num}.md"
+    out = local.tuis_dir(code) / f"lab{num}.md"
     out.write_text(text, encoding="utf-8")
     return {"created": None, "path": str(out), "text": text, "tag": tag,
             "repo": str(repo), "lab": str(lab),

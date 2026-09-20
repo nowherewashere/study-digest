@@ -582,10 +582,11 @@ def pull_updates(cfg, moodle, tuis, errors):
 
 
 def course_state(cfg, course, by_lab, errors):
-    """Курс на диске: git, релизы на хостингах, лабы с их готовностью и парой в ТУИС."""
-    item = {**course.as_dict(), "dir": str(course.dir), "repo": None,
-            "releases": {}, "unreleased_tags": [], "labs": []}
-    repo = local.course_repo(course.code)
+    """Курс на диске: профиль сдачи, а у release — git, релизы на хостингах, лабы с их
+    готовностью и парой в ТУИС. У file-курса репозиторий (если есть) не смотрится."""
+    item = {**course.as_dict(), "dir": str(course.dir), "flow": local.flow_of(cfg, course.code),
+            "repo": None, "releases": {}, "unreleased_tags": [], "labs": []}
+    repo = local.course_repo(course.code) if item["flow"] == "release" else None
     if not repo:
         return item
     item["repo"] = local.repo_state(repo)
