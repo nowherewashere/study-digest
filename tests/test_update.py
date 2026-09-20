@@ -137,5 +137,18 @@ class UpdateTest(unittest.TestCase):
         with self.assertRaises(StudyError) as e:
             update.check()
         self.assertIn("fetch не удался", e.exception.message)
+        # молчание сети: две попытки fetch по таймауту, потом честная строка
+        real, calls = update.local.run, []
+
+        def silent(path, *args, **kw):
+            if args[0] != "fetch":
+                return real(path, *args, **kw)
+            calls.append(kw["timeout"])
+            return None   # как при TimeoutExpired
+
+        with mock.patch.object(update.local, "run", silent), self.assertRaises(StudyError) as e:
+            update.check()
+        self.assertEqual(calls, [update.FETCH_TIMEOUT] * 2)
+        self.assertIn("нет ответа за 20 с, 2 попытки", e.exception.message)
         git(self.clone, "branch", "--unset-upstream")   # клон без ветки слежения — не обновляем
         self.assertIsNone(update.check())

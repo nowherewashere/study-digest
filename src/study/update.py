@@ -8,7 +8,10 @@
 from . import agent, local
 from .config import HERE, StudyError
 
-FETCH_TIMEOUT = 8   # секунд: утренняя сводка не должна ждать GitHub
+# Секунд на fetch: SSH-рукопожатие с GitHub из медленной сети занимает и 10 с; при молчании —
+# одна повторная попытка, чтобы разовый тормоз не давал строку «Не удалось» в сводке.
+FETCH_TIMEOUT = 20
+FETCH_TRIES = 2
 VERIFY_TIMEOUT = 10  # gpg локально; без ключа автора в связке подпись просто «не проверена»
 
 
@@ -22,9 +25,13 @@ def check(fetch=True):
     if not (HERE / ".git").exists() or not local.git(HERE, "rev-parse", "--verify", "-q", "@{u}"):
         return None
     if fetch:
-        r = local.run(HERE, "fetch", "--quiet", "--tags", timeout=FETCH_TIMEOUT)
+        for _ in range(FETCH_TRIES):
+            r = local.run(HERE, "fetch", "--quiet", "--tags", timeout=FETCH_TIMEOUT)
+            if r is not None:
+                break
         if r is None or r.returncode:
-            why = r.stderr.strip() if r else f"нет ответа за {FETCH_TIMEOUT} с"
+            why = (r.stderr.strip() if r
+                   else f"нет ответа за {FETCH_TIMEOUT} с, {FETCH_TRIES} попытки")
             raise StudyError("git", f"fetch не удался: {why}", where="update")
     commits = local.git(HERE, "log", "--format=%s", "HEAD..@{u}").splitlines()
     # Что именно приедет: diff и подпись верхнего коммита — код работает с токенами,
