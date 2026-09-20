@@ -16,7 +16,57 @@
      "submissiondrafts": 0,
      "intro": "<p>Сдать отчет по лабораторной работе № 1. Vagrant и Packer</p>",
      "introformat": 1,
-     "grade": 10
+     "grade": 10,
+     "configs": [
+      {
+       "plugin": "file",
+       "subtype": "assignsubmission",
+       "name": "enabled",
+       "value": "1"
+      },
+      {
+       "plugin": "file",
+       "subtype": "assignsubmission",
+       "name": "maxfilesubmissions",
+       "value": "2"
+      },
+      {
+       "plugin": "file",
+       "subtype": "assignsubmission",
+       "name": "maxsubmissionsizebytes",
+       "value": "10485760"
+      },
+      {
+       "plugin": "file",
+       "subtype": "assignsubmission",
+       "name": "filetypeslist",
+       "value": ".pdf"
+      },
+      {
+       "plugin": "onlinetext",
+       "subtype": "assignsubmission",
+       "name": "enabled",
+       "value": "1"
+      },
+      {
+       "plugin": "onlinetext",
+       "subtype": "assignsubmission",
+       "name": "wordlimit",
+       "value": "500"
+      },
+      {
+       "plugin": "onlinetext",
+       "subtype": "assignsubmission",
+       "name": "wordlimitenabled",
+       "value": "1"
+      },
+      {
+       "plugin": "comments",
+       "subtype": "assignfeedback",
+       "name": "enabled",
+       "value": "1"
+      }
+     ]
     },
     {
      "id": 12,
@@ -29,7 +79,39 @@
      "submissiondrafts": 0,
      "intro": "<p>Сдать отчет по лабораторной работе № 2. DNS</p>",
      "introformat": 1,
-     "grade": 10
+     "grade": 10,
+     "configs": [
+      {
+       "plugin": "file",
+       "subtype": "assignsubmission",
+       "name": "enabled",
+       "value": "1"
+      },
+      {
+       "plugin": "file",
+       "subtype": "assignsubmission",
+       "name": "maxfilesubmissions",
+       "value": "20"
+      },
+      {
+       "plugin": "file",
+       "subtype": "assignsubmission",
+       "name": "maxsubmissionsizebytes",
+       "value": "0"
+      },
+      {
+       "plugin": "file",
+       "subtype": "assignsubmission",
+       "name": "filetypeslist",
+       "value": ""
+      },
+      {
+       "plugin": "onlinetext",
+       "subtype": "assignsubmission",
+       "name": "enabled",
+       "value": "0"
+      }
+     ]
     },
     {
      "id": 13,
@@ -153,7 +235,39 @@
      "submissiondrafts": 0,
      "intro": "<p>Загрузка 1 лабораторной работы</p>",
      "introformat": 1,
-     "grade": 10
+     "grade": 10,
+     "configs": [
+      {
+       "plugin": "file",
+       "subtype": "assignsubmission",
+       "name": "enabled",
+       "value": "1"
+      },
+      {
+       "plugin": "file",
+       "subtype": "assignsubmission",
+       "name": "maxfilesubmissions",
+       "value": "3"
+      },
+      {
+       "plugin": "file",
+       "subtype": "assignsubmission",
+       "name": "maxsubmissionsizebytes",
+       "value": "20971520"
+      },
+      {
+       "plugin": "file",
+       "subtype": "assignsubmission",
+       "name": "filetypeslist",
+       "value": "document"
+      },
+      {
+       "plugin": "onlinetext",
+       "subtype": "assignsubmission",
+       "name": "enabled",
+       "value": "0"
+      }
+     ]
     }
    ]
   },

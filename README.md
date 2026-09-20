@@ -280,7 +280,7 @@ MSYS_NO_PATHCONV=1 wsl.exe -d <дистрибутив> -- bash -c '~/work/study/
 | `study status <id-задания>` | состояние ответа на задание |
 | `study files [<курс>] [--pull] [--all] [--force]` | файлы курса: что появилось, забрать в `stash/`; перезалитый в ТУИС файл перекачивается поверх копии (mtime копии = `timemodified` из ТУИС); `--force` — всё заново; без курса — по всем папкам из `config.env`, строкой на курс |
 | `study upload <файл>… [--itemid N]` | загрузка вложений, печатает `itemid` |
-| `study submit <id> [--text F] [--files <itemid>] --confirm` | отправка ответа; без `--confirm` — план и код возврата 1 |
+| `study submit <id> [--text F] [--attach <файл>…] [--files <itemid>] --confirm` | отправка ответа; без `--confirm` — план и код возврата 1. План показывает, что принимает задание (текст, число/типы/размер файлов), и отказывает при несовпадении даже с `--confirm`; `--attach` загружает файлы сам при отправке |
 | `study functions [подстрока]` · `study call <функция> [ключ=значение …]` | ручки Moodle и произвольный вызов; повтор ключа — массив: `options[ids][0]=101` |
 
 ### Хостинги кода
@@ -375,8 +375,10 @@ study rt upload <файл> | --url U [--title T] [--category N] [--age A] [--hid
 из git-remote, тег — последний или `--tag`, PDF отчёта и презентации — из `_output/`.
 Ссылок на скринкасты в API нет, они хранятся в `<код>/tuis/labNN.env` (четыре записи
 на двух площадках плюс два плейлиста); первый запуск создаёт файл пустым, второй пишет
-`<код>/tuis/labNN.md`. Затем `study upload <pdf>…` → `itemid` →
-`study submit <id> --text <код>/tuis/labNN.md --files <itemid> --confirm`. Оба файла
+`<код>/tuis/labNN.md`. Затем
+`study submit <id> --text <код>/tuis/labNN.md --attach <отчёт.pdf> <презентация.pdf>`:
+план сверяет текст и файлы с настройками задания, с `--confirm` загружает файлы
+и отправляет (старый путь `study upload` → `--files <itemid>` остаётся). Оба файла
 лежат вне репозитория курса. Полный чек-лист от выполнения до ответа —
 [`docs/lab-submission.md`](docs/lab-submission.md).
 

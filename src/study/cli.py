@@ -12,7 +12,7 @@ import time
 from . import agent, answer, courses, digest, files, hosting, local, setup, update
 from .config import Config, Course, StudyError
 from .fmt import moment, table
-from .moodle import Moodle
+from .moodle import Moodle, accepts, accepts_line, check_submission, mb
 from .rutube import DEFAULT_CATEGORY, Rutube
 
 
@@ -172,27 +172,46 @@ def cmd_upload(cfg, args):
 
 
 def cmd_submit(cfg, args):
+    """План сверяется с настройками задания (что принимает) и с файлами на диске; при
+    несовпадении — отказ даже с --confirm. Вложения из --attach грузятся только при отправке."""
     m = Moodle(cfg)
     text = read_text(args.text)
+    attach = [pathlib.Path(p) for p in args.attach or []]
     course_list, _ = m.assignments()
     found = next((a for c in course_list for a in c["assignments"]
                   if a["id"] == args.assign_id), None)
+    acc = accepts(found) if found else None
+    problems = check_submission(acc, text, attach, args.files)
     plan = {"assign_id": args.assign_id, "name": found["name"] if found else None,
-            "due": moment(found.get("duedate")) if found else None,
+            "due": moment(found.get("duedate")) if found else None, "accepts": acc,
             "text_file": args.text, "text_chars": len(text or ""),
-            "files_itemid": args.files, "confirmed": bool(args.confirm)}
-    if not args.confirm:
-        lines = ["Что будет отправлено:",
-                 "  задание: {} (id {})".format(plan["name"] or "?", args.assign_id),
-                 "  срок: {}".format(plan["due"]["full"] if plan["due"] else "—"),
-                 "  текст: " + (f"{args.text} ({len(text)} символов), формат Markdown"
-                                if text is not None else "нет"),
-                 "  вложения: {}".format(args.files or "нет"),
-                 "",
-                 "Отправка необратима: у заданий курса submissiondrafts=0, черновика не будет.",
-                 "Повтори с --confirm."]
+            "attach": [{"name": p.name, "bytes": p.stat().st_size if p.is_file() else None}
+                       for p in attach],
+            "files_itemid": args.files, "problems": problems, "confirmed": bool(args.confirm)}
+    if attach:
+        vl = ", ".join("{} ({})".format(a["name"], mb(a["bytes"]) if a["bytes"] is not None
+                                        else "нет") for a in plan["attach"])
+        vl += f" + itemid {args.files}" if args.files else ""
+    else:
+        vl = (f"itemid {args.files} (состав по itemid не виден, не проверяется)" if args.files
+              else "нет")
+    lines = ["Что будет отправлено:",
+             "  задание: {} (id {})".format(plan["name"] or "?", args.assign_id),
+             "  срок: {}".format(plan["due"]["full"] if plan["due"] else "—"),
+             "  принимает: " + accepts_line(acc),
+             "  текст: " + (f"{args.text} ({len(text)} символов), формат Markdown"
+                            if text is not None else "нет"),
+             "  вложения: " + vl]
+    if problems:
+        lines += ["", "Нельзя отправить:"] + [f"  – {x}" for x in problems]
         return plan, "\n".join(lines), 1
-    plan["result"] = m.save_submission(args.assign_id, text, args.files)
+    if not args.confirm:
+        lines += ["", ("Отправка необратима: у заданий курса submissiondrafts=0, черновика "
+                       "не будет. Повтори с --confirm.")]
+        return plan, "\n".join(lines), 1
+    itemid = m.upload(attach, args.files or 0) if attach else args.files
+    plan["files_itemid"] = itemid
+    plan["result"] = m.save_submission(args.assign_id, text, itemid)
     return plan, "Отправлено: {} (id {})".format(plan["name"] or "?", args.assign_id)
 
 
@@ -467,9 +486,15 @@ def tuis_parsers(sub):
     s.add_argument("files", nargs="+")
     s.add_argument("--itemid", type=int, default=0, help="добавить к существующему itemid")
 
+    submit_parser(sub)
+
+
+def submit_parser(sub):
     s = add(sub, "submit", "отправка ответа на задание (необратимо)", cmd_submit)
     s.add_argument("assign_id", type=int)
     s.add_argument("--text", help="файл с текстом ответа (у заданий «только файлы» не нужен)")
+    s.add_argument("--attach", nargs="+", metavar="ФАЙЛ",
+                   help="вложения: проверить, загрузить и прикрепить (вместо upload + --files)")
     s.add_argument("--files", type=int, help="itemid из study upload")
     s.add_argument("--confirm", action="store_true", help="подтвердить отправку")
 

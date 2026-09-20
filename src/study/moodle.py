@@ -1,4 +1,6 @@
 """Клиент ТУИС (Moodle). Подробности ручек — в ../docs/tuis-api.md."""
+import re
+
 from . import net
 from .config import StudyError
 
@@ -140,3 +142,81 @@ class Moodle:
         if itemid:
             params["plugindata[files_filemanager]"] = itemid
         return self.call("mod_assign_save_submission", **params)
+
+
+# --- правила сдачи задания
+
+def accepts(assign):
+    """Что принимает задание — по `configs` из mod_assign_get_assignments; None — настроек нет
+    (тогда не проверяем, а не считаем всё выключенным)."""
+    cfg = {}
+    for c in assign.get("configs") or []:
+        if c.get("subtype") == "assignsubmission":
+            cfg.setdefault(c.get("plugin"), {})[c.get("name")] = c.get("value")
+    if not cfg:
+        return None
+    f, t = cfg.get("file", {}), cfg.get("onlinetext", {})
+    types = [x.lower() for x in re.split(r"[,;\s]+", f.get("filetypeslist") or "") if x]
+    return {"files": {"enabled": f.get("enabled") == "1",
+                      "max": int(f.get("maxfilesubmissions") or 0) or None,
+                      "max_bytes": int(f.get("maxsubmissionsizebytes") or 0) or None,
+                      "types": types},
+            "text": {"enabled": t.get("enabled") == "1",
+                     "words": int(t.get("wordlimit") or 0) or None
+                     if t.get("wordlimitenabled") == "1" else None}}
+
+
+def mb(n):
+    if n >= 1073741824:
+        return f"{n / 1073741824:g} ГБ"
+    return f"{n / 1048576:g} МБ" if n >= 1048576 else f"{n // 1024} КБ"
+
+
+def check_submission(acc, text, paths, itemid=None):
+    """Что помешает отправке; пусто — можно. `paths` — вложения с диска, `itemid` — готовая
+    черновая область (её состав не виден, не проверяется). Типы — только если в списке
+    задания одни расширения: группы Moodle вроде `document` развернуть нельзя."""
+    out = []
+    if text is None and not paths and not itemid:
+        out.append("нечего отправлять: ни --text, ни --attach, ни --files")
+    have = []
+    for p in paths:
+        (have if p.is_file() else out).append(p if p.is_file() else f"нет файла {p}")
+    if acc is None:
+        return out
+    f, t = acc["files"], acc["text"]
+    if text is not None and not t["enabled"]:
+        out.append("текст ответа в задании выключен — только файлы")
+    elif text is not None and t["words"] and len(text.split()) > t["words"]:
+        out.append(f"текст длиннее лимита: {len(text.split())} слов, можно {t['words']}")
+    if (paths or itemid) and not f["enabled"]:
+        out.append("файлы в задании выключены — только текст")
+        return out
+    if f["max"] and len(have) > f["max"]:
+        out.append(f"файлов {len(have)}, задание принимает до {f['max']}")
+    strict = f["types"] and all(x.startswith(".") for x in f["types"])
+    for p in have:
+        size = p.stat().st_size
+        if f["max_bytes"] and size > f["max_bytes"]:
+            out.append(f"{p.name}: {mb(size)}, предел {mb(f['max_bytes'])}")
+        if strict and p.suffix.lower() not in f["types"]:
+            out.append(f"{p.name}: тип {p.suffix.lower() or 'без расширения'} "
+                       f"не из списка {', '.join(f['types'])}")
+    return out
+
+
+def accepts_line(acc):
+    """«текст — да, до 500 слов · файлы — до 3, типы .pdf, до 20 МБ» для плана отправки."""
+    if acc is None:
+        return "неизвестно (у задания нет configs)"
+    f, t = acc["files"], acc["text"]
+    text = ("да" + (f", до {t['words']} слов" if t["words"] else "")) if t["enabled"] else "нет"
+    files_ = "нет"
+    if f["enabled"]:
+        parts = [f"до {f['max']}" if f["max"] else "без ограничения числа"]
+        if f["types"]:
+            parts.append("типы " + ", ".join(f["types"]))
+        if f["max_bytes"]:
+            parts.append("до " + mb(f["max_bytes"]))
+        files_ = ", ".join(parts)
+    return f"текст — {text} · файлы — {files_}"
