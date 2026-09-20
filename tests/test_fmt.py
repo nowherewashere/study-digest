@@ -26,6 +26,8 @@ class NamesTest(unittest.TestCase):
         self.assertEqual(fmt.short_name("Доклад к лекции 4"), "Доклад к лекции 4")
         self.assertEqual(fmt.short_name("Пересдача лабораторной работы № 3"), "Пересдача ЛР 3")
         self.assertEqual(fmt.short_name("<b>Тест</b> &amp; ещё"), "Тест & ещё")
+        self.assertEqual(fmt.plain("<p>Нет <b>схемы</b>.</p><p>Срок: 1 <i>день</i>!</p>"),
+                         "Нет схемы. Срок: 1 день!")
         self.assertEqual(len(fmt.short_name("x" * 100)), 61)   # 60 символов и многоточие
 
 

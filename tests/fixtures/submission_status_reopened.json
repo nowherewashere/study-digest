@@ -1,0 +1,56 @@
+{
+ "lastattempt": {
+  "submission": {
+   "id": 5003,
+   "userid": 100,
+   "attemptnumber": 1,
+   "timecreated": 1789333140,
+   "timemodified": 1789505940,
+   "status": "reopened",
+   "plugins": []
+  },
+  "submissionsenabled": true,
+  "locked": false,
+  "graded": true,
+  "canedit": true,
+  "cansubmit": true,
+  "blindmarking": false
+ },
+ "feedback": {
+  "grade": {
+   "id": 7003,
+   "assignment": 11,
+   "userid": 100,
+   "grade": "4.00000",
+   "timemodified": 1789505940
+  },
+  "gradefordisplay": "4,00 / 10,00",
+  "gradeddate": 1789505940,
+  "plugins": [
+   {
+    "type": "comments",
+    "name": "Feedback comments",
+    "fileareas": [],
+    "editorfields": [
+     {
+      "name": "comments",
+      "description": "Feedback comments",
+      "text": "<p>Переделать раздел 3: <b>нет схемы сети</b>.</p>",
+      "format": 1
+     }
+    ]
+   },
+   {
+    "type": "file",
+    "name": "Feedback files",
+    "fileareas": [
+     {
+      "area": "feedback_files",
+      "files": []
+     }
+    ]
+   }
+  ]
+ },
+ "warnings": []
+}

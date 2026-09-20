@@ -48,9 +48,10 @@ def moment(ts, now=None):
 
 
 def plain(s, limit=280):
-    """HTML из описаний Moodle → однострочный текст."""
+    """HTML из описаний Moodle → однострочный текст; пробел перед знаком препинания,
+    оставшийся от строчного тега (`<b>…</b>.`), убирается."""
     s = re.sub(r"<[^>]+>", " ", s or "")
-    s = htmllib.unescape(re.sub(r"\s+", " ", s)).strip()
+    s = re.sub(r"\s+([.,;:!?»)])", r"\1", htmllib.unescape(re.sub(r"\s+", " ", s)).strip())
     return s[:limit] + ("…" if len(s) > limit else "")
 
 

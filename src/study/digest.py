@@ -8,6 +8,7 @@ import time
 from . import files, hosting, local, update
 from .config import Course, StudyError
 from .fmt import md_table, moment, parse_name, plain, short_name, weekday
+from .moodle import feedback_text
 from .snapshot import load_state, save_state
 
 # Что считаем новостью в core_course_get_updates_since; остальное (submissions, grades,
@@ -18,8 +19,10 @@ FILES = {"contentfiles", "files", "contents"}
 DATE_IDS = {"duedate", "timeclose"}
 KINDS = {"assign": "задание", "choice": "выбор темы",
          "workshop": "взаимная проверка", "feedback": "опрос"}
-SUBMISSION = {"new": "не сдано", "draft": "черновик", "reopened": "переоткрыто",
+SUBMISSION = {"new": "не сдано", "draft": "черновик", "reopened": "на доработку",
               "submitted": "сдано", "hidden": "доступ закрыт"}
+# Состояния, при которых работа ещё ждёт ответа: не начато, черновик, вернули на доработку
+PENDING = {"new", "draft", "reopened"}
 # Уведомления, которые Moodle шлёт сам: про наши же действия, про сроки (они уже в таблице)
 # и про входы в аккаунт. Отсев по eventtype, а не по теме: тема зависит от языка.
 AUTO_EVENTS = {"assign_due_soon", "assign_due_digest", "assign_notification", "newlogin"}
@@ -36,6 +39,11 @@ def soft(errors, where):
         yield
     except StudyError as e:
         errors.append({**e.as_dict(), "where": where})
+
+
+def pending(a):
+    """Работа ещё ждёт ответа: не сдана, черновик, вернули на доработку или статус неизвестен."""
+    return a["submission"] in PENDING or a["submission"] is None
 
 
 def news(course, m, section, what):
@@ -67,6 +75,7 @@ class Collector:
         self.graded = state.get("grades")             # {курс: {работа: балл}}; None — нет снимка
         self.files = state.get("files")               # {курс: [cmid/файл]}; None — нет состава
         self.seen_courses = state.get("courses")      # {id: название}; None — снимка нет
+        self.fb = state.get("feedback")               # {id задания: отзыв}; None — снимка нет
         self.errors = list(errors)                    # с чем пришёл снимок
         self.courses = {c.id: c for c in cfg.track(moodle.courses())}
         self.ignore = cfg.ignore()   # решение пользователя: этих курсов в сводке нет вовсе
@@ -140,6 +149,9 @@ class Collector:
             sub = (st.get("lastattempt") or {}).get("submission") or {}
             item["submission"] = sub.get("status") or "new"
             item["grade"] = ((st.get("feedback") or {}).get("grade") or {}).get("grade")
+            item["feedback"] = feedback_text(st)
+            item["feedback_new"] = bool(item["feedback"]) and self.fb is not None \
+                and self.fb.get(str(item["assign_id"])) != item["feedback"]
 
     def retakes(self, items):
         """Пересдача нужна, только если оригинал просрочен, не сдан и не оценен; иначе это
@@ -336,11 +348,13 @@ class Collector:
                             if self.seen_courses is not None
                             and str(c.id) not in self.seen_courses],
             "deadlines": deadlines,
-            "overdue": [a for a in overdue if a["submission"] in ("new", None)],
-            "submitted": [a for a in overdue if a["submission"] not in ("new", None)],
+            "overdue": [a for a in overdue if pending(a)],
+            "submitted": [a for a in overdue if not pending(a)],
             # просроченное и несданное — впереди: пересдача всё ещё стоит баллов
             "not_started": [a for a in overdue + deadlines
-                            if a["source"] == "assign_api" and a["submission"] == "new"],
+                            if a["source"] == "assign_api" and a["submission"] in PENDING],
+            # отзывы преподавателя, которых в снимке ещё не было
+            "feedback": [a for a in by_due(self.soon + self.overdue) if a.get("feedback_new")],
             "retakes": [{"assign_id": a.get("assign_id"), "cmid": a["cmid"], "short": a["short"],
                          "course": a["course"], "due": a["due"], "retake_of": a["retake_of"],
                          "needed": a["needed"]}
@@ -366,6 +380,10 @@ class Collector:
                       if self._contents.get(cid) is not None
                       else (self.files or {}).get(str(cid), [])
                       for cid in self.courses},
+            # отзывы: статус запрашивался не у всех — прошлые остаются
+            "feedback": {**(self.fb or {}),
+                         **{str(a["assign_id"]): a["feedback"] for a in self.assigns.values()
+                            if a.get("feedback")}},
         }
 
 
@@ -399,6 +417,8 @@ def status_of(a):
     if a["submission"] is None:
         # статус не получен (ошибка в errors) или элемент без ответа: опрос, взаимная проверка
         return KINDS.get(a.get("modname"), "?") if a["kind"] == "activity" else "?"
+    if a["submission"] == "reopened" and a.get("feedback"):
+        return "на доработку: " + plain(a["feedback"], 60)
     return SUBMISSION.get(a["submission"], a["submission"])
 
 
@@ -533,6 +553,8 @@ def render(d):
     sections = [
         ("Тесты", quiz_rows(t), ["Когда", "Осталось", "Тест", "Курс", "Попытки", "Время"]),
         ("Баллы", grade_rows(t), ["Курс", "Итого", "Новое"]),
+        ("Отзывы", [[label(a), a["short"], a["feedback"]] for a in t.get("feedback", [])],
+         ["Курс", "Работа", "Отзыв преподавателя"]),
         ("Уведомления", [[n["at"]["text"], n["subject"]] for n in t.get("notifications", [])],
          ["Когда", "Тема"]),
         ("Новое в курсах", news, ["Курс", "Раздел", "Что", "Файлы"]),

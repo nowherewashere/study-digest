@@ -223,6 +223,37 @@ class CollectorTest(DigestCase):
         d = files.listing(self.cfg, Moodle(self.cfg), Course(1, "nettech", "Сетевые технологии"))
         self.assertEqual((d["tracked"], d["files"]), (True, []))
 
+    def test_reopened_feedback(self):
+        # ЛР 1 вернули на доработку с отзывом: она в not_started и «Горит», отзыв — новый
+        def run(state):
+            queue(self.net)
+            self.net.drop("mod_assign_get_submission_status", "assignid=11")
+            self.net.reply("POST", ("mod_assign_get_submission_status", "assignid=11"),
+                           fixture("submission_status_reopened"))
+            c = digest.Collector(self.cfg, Moodle(self.cfg), 21, state)
+            return c, c.run()
+
+        c, d = run({**STATE, "feedback": {}})
+        lab = next(a for a in d["deadlines"] if a["assign_id"] == 11)
+        self.assertEqual((lab["submission"], lab["grade"], lab["feedback"], lab["feedback_new"]),
+                         ("reopened", "4.00000", "Переделать раздел 3: нет схемы сети.", True))
+        self.assertIn("ЛР 1 — Vagrant и Packer", names(d["not_started"]))
+        self.assertEqual([a["assign_id"] for a in d["feedback"]], [11])
+        text = digest.render_digest(d)
+        self.assertIn("| ЛР 1 — Vagrant и Packer | nettech | на доработку: Переделать раздел 3: "
+                      "нет схемы сети. |", text)
+        self.assertIn("\n## Отзывы\n", text)
+        self.assertIn("| nettech | ЛР 1 — Vagrant и Packer | Переделать раздел 3: нет схемы сети. "
+                      "|", text)
+        self.assertIn("- **ЛР 1 — Vagrant и Packer** · nettech", text)   # «Горит»
+        self.assertEqual(c.snapshot(d)["feedback"], {"11": "Переделать раздел 3: нет схемы сети."})
+
+        _, d = run(STATE)   # снимок без отзывов (старый) — отзыв есть, но не «новый»
+        self.assertFalse(next(a for a in d["deadlines"] if a["assign_id"] == 11)["feedback_new"])
+        self.assertEqual(d["feedback"], [])
+        _, d = run({**STATE, "feedback": {"11": "Переделать раздел 3: нет схемы сети."}})
+        self.assertEqual(d["feedback"], [])   # уже видели
+
     def test_grades_and_outside(self):
         _, d = self.collect()
         g = {x["course"]["id"]: x for x in d["grades"]}
@@ -249,6 +280,7 @@ class CollectorTest(DigestCase):
                                              "Сдать отчет по лабораторной работе № 2. DNS": 9.5},
                                        "2": {"Загрузка 1 лабораторной работы": 10.0}})
         self.assertEqual(s["files"], KEYS)
+        self.assertEqual(s["feedback"], {})   # в фикстурах отзывов нет
 
     def test_snapshot_keeps_files_of_unread_course(self):
         queue(self.net)
