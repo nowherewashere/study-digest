@@ -67,7 +67,8 @@ class SetupCase(unittest.TestCase):
 class SetupTest(SetupCase):
     def test_tokens_saved_and_skipped(self):
         cfg = self.config()
-        self.answers = ["n", "", "", "nettech", "", "", "n"]   # браузер, оператор, курсы, pull
+        # браузер, оператор, курсы (папка и сдача ×3; у второго курса сдача — r), pull
+        self.answers = ["n", "", "", "nettech", "", "", "r", "", "", "n"]
         self.secrets = ["a" * 32, "", ""]
         self.moodle_ok()
         log, text, out = self.run_setup(cfg)
@@ -92,8 +93,14 @@ class SetupTest(SetupCase):
         self.assertIn(f"рабочая папка {self.root},\n  в Instructions - текст из "
                       f"{self.here / 'docs' / 'daily-digest-prompt.md'}", text)
         self.assertTrue((self.root / "nettech" / "stash").is_dir())
-        self.assertTrue((self.root / "2" / "tuis").is_dir())
+        self.assertFalse((self.root / "2" / "tuis").exists())   # tuis/ заводит study answer
         self.assertEqual(Config(cfg.path).codes(), {1: "nettech", 2: "2", 4: "4"})
+        # nettech: в папке уже есть репозиторий — авто release; 2 — ответ r; 4 — авто file
+        self.assertEqual(Config(cfg.path).flows(), {1: "release", 2: "release", 4: "file"})
+        self.assertIn("    сдача, release|file [release]: ", self.prompts)
+        self.assertIn("    сдача, release|file [file]: ", self.prompts)
+        self.assertIn("Сдача: релиз репозитория со скринкастами",
+                      (self.root / "2" / "NOTES.md").read_text(encoding="utf-8"))
         self.assertFalse((self.root / "CLAUDE.md").exists())
         self.assertIn("позже: study files --pull", out)
 
@@ -162,8 +169,8 @@ class SetupTest(SetupCase):
         # на шаге «Каталоги» сети нет: название курса для заготовки NOTES.md — из снимка
         (self.here / ".state.json").write_text(
             json.dumps({"last_run": 1, "courses": {"1": "Сетевые технологии"}}), encoding="utf-8")
-        # операторы; курсы: старые в игнор, готово, два имени папок; скачать
-        self.answers = ["claude codex", "s", "", "", "", "y"]
+        # операторы; курсы: старые в игнор, готово, два имени папок и два профиля; скачать
+        self.answers = ["claude codex", "s", "", "", "", "", "", "y"]
         self.moodle_ok()
         self.net.reply("POST", "core_enrol_get_users_courses", fixture("users_courses"))  # pull
         self.net.reply("POST", ("core_course_get_contents", "courseid=1"),
@@ -175,12 +182,12 @@ class SetupTest(SetupCase):
         self.net.reply("GET", "lecture-01.pdf", b"%PDF")
         with mock.patch.object(setup, "tokens", lambda *_: None):   # токены не спрашиваем
             log, _, out = self.run_setup(cfg)
-        self.assertIn(["ok", "Каталоги", f"{self.root / 'nettech'}{os.sep}{{stash,tuis,NOTES.md}}"],
-                      log)
+        self.assertIn(["ok", "Каталоги", f"{self.root / 'nettech'}{os.sep}{{stash,NOTES.md}}"], log)
         self.assertIn(["ok", "Каталоги", f"снимок состояния сводки: {self.here}"], log)
         notes = (self.root / "nettech" / "NOTES.md").read_text(encoding="utf-8")
         self.assertTrue(notes.startswith("# Сетевые технологии — заметки\n"))
         self.assertIn("Курс в ТУИС: `1`", notes)
+        self.assertIn("Сдача: релиз репозитория со скринкастами", notes)   # в папке репозиторий
         self.assertIn(["ok", "Оператор", "поставлено: claude codex"], log)
         claude = (self.root / "CLAUDE.md").read_text(encoding="utf-8")
         self.assertTrue(claude.startswith("# Моё\n\n" + agent.BEGIN))
@@ -340,11 +347,11 @@ class NotesStubTest(unittest.TestCase):
     def test_stub_once(self):
         root = tmpdir(self)
         patch(self, courses, "ROOT", root)
-        p = courses.notes_stub("nettech", 1, "Сетевые технологии")
+        p = courses.notes_stub("nettech", 1, "Сетевые технологии", "release")
         self.assertEqual(p, root / "nettech" / "NOTES.md")
         text = p.read_text(encoding="utf-8")
-        self.assertIn("# Сетевые технологии — заметки\n\nКурс в ТУИС: `1` «Сетевые технологии»",
-                      text)
+        self.assertIn("# Сетевые технологии — заметки\n\nКурс в ТУИС: `1` «Сетевые технологии». "
+                      "Сдача: релиз репозитория со скринкастами (`study answer`).", text)
         self.assertIn("`study files nettech --pull`", text)
         for head in ("## Задания и сроки", "## Ключевые находки", "## Лабы"):
             self.assertIn(head, text)
@@ -354,5 +361,6 @@ class NotesStubTest(unittest.TestCase):
         (root / "bpm" / "NOTES.md").write_text("# Моё\n", encoding="utf-8")
         self.assertIsNone(courses.notes_stub("bpm", 5))
         self.assertEqual((root / "bpm" / "NOTES.md").read_text(encoding="utf-8"), "# Моё\n")
-        self.assertTrue(courses.notes_stub("x", 9).read_text(encoding="utf-8")
-                        .startswith("# x — заметки"))   # без названия — код папки
+        text = courses.notes_stub("x", 9).read_text(encoding="utf-8")
+        self.assertTrue(text.startswith("# x — заметки"))   # без названия — код папки
+        self.assertIn("Сдача: не задано (FLOW в config.env)", text)

@@ -74,6 +74,13 @@ def course_repo(code):
     return found[0] if found else None
 
 
+def flow_of(cfg, code):
+    """Профиль сдачи курса: строка FLOW в config.env, а без неё — release, если в папке курса
+    есть репозиторий, иначе file."""
+    cid = next((i for i, c in cfg.codes().items() if c == code), None)
+    return cfg.flows().get(cid) or ("release" if course_repo(code) else "file")
+
+
 def tuis_dir(code):
     """Материалы для сдачи в ТУИС — рядом с предметом, а не внутри репозитория курса:
     в репозитории курса лежит только сама работа, преподаватель смотрит именно его."""

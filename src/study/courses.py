@@ -2,6 +2,7 @@
 import sys
 import time
 
+from . import local
 from .config import ROOT
 from .fmt import table
 
@@ -9,8 +10,8 @@ from .fmt import table
 # и БРС из stash/. Файл ни при каких условиях не перезаписывается.
 NOTES = """# {title} — заметки
 
-Курс в ТУИС: `{cid}` «{title}». Преподаватель, формат сдачи, правила — дописать по программе
-и БРС из `stash/` (`study files {code} --pull`).
+Курс в ТУИС: `{cid}` «{title}». Сдача: {flow}. Преподаватель, формат сдачи, правила —
+дописать по программе и БРС из `stash/` (`study files {code} --pull`).
 
 ## Задания и сроки
 
@@ -28,13 +29,19 @@ NOTES = """# {title} — заметки
 """
 
 
-def notes_stub(code, cid, title=None):
+FLOW_NOTE = {"release": "релиз репозитория со скринкастами (`study answer`)",
+             "file": "файлом (`study submit <id> --attach`)"}
+
+
+def notes_stub(code, cid, title=None, flow=None):
     """`<код>/NOTES.md`, если его ещё нет: путь созданного файла, иначе None."""
     p = ROOT / code / "NOTES.md"
     if p.exists():
         return None
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(NOTES.format(title=title or code, cid=cid, code=code), encoding="utf-8")
+    p.write_text(NOTES.format(title=title or code, cid=cid, code=code,
+                              flow=FLOW_NOTE.get(flow, "не задано (FLOW в config.env)")),
+                 encoding="utf-8")
     return p
 
 
@@ -46,10 +53,12 @@ def rows(cfg, moodle, include_hidden=False):
     """Курсы пользователя с признаками: в игноре, давно не заходил, имя папки."""
     win = cfg.active_days() * 86400
     now = time.time()
-    ignore, codes = cfg.ignore(), cfg.codes()
+    ignore, codes, flows = cfg.ignore(), cfg.codes(), cfg.flows()
     return [{"id": c["id"], "shortname": c.get("shortname"), "title": c["fullname"],
              "lastaccess": c.get("lastaccess") or 0, "code": codes.get(c["id"]),
-             "ignored": c["id"] in ignore,
+             "flow": flows.get(c["id"]), "ignored": c["id"] in ignore,
+             # без строки FLOW профиль угадывается: release при репозитории в папке, иначе file
+             "guess": local.flow_of(cfg, codes[c["id"]]) if c["id"] in codes else None,
              "stale": not c.get("lastaccess") or now - c["lastaccess"] > win}
             for c in moodle.courses(include_hidden=include_hidden)]
 
@@ -60,11 +69,13 @@ def render(rows_):
     return "\n".join([
         table([[str(r["id"]), seen(r["lastaccess"]),
                 "игнор" if r["ignored"] else ("старый?" if r["stale"] else ""),
-                r["code"] or "-", r["title"]] for r in rows_],
-              ["id", "заходил", "", "папка", "курс"]),
+                r["code"] or "-", r["flow"] or (r["guess"] + "?" if r["guess"] else "-"),
+                r["title"]] for r in rows_],
+              ["id", "заходил", "", "папка", "сдача", "курс"]),
         "", "Строка для config.env — курсы, которые НЕ отслеживать (кандидаты «старый?»):",
         f"COURSE_IGNORE={stale}", "",
-        "Папку локального репозитория курса задать: CODE <id> <имя-папки>"])
+        ("Папку курса задать: CODE <id> <имя-папки>; сдачу — FLOW <id> release|file "
+         "(«?» — угадано: release, если в папке есть репозиторий, иначе file)")])
 
 
 def setup(cfg, rows_):
@@ -104,21 +115,26 @@ def setup(cfg, rows_):
             if tok.isdigit() and int(tok) in num:
                 ignore_ids ^= {num[int(tok)]["id"]}
 
-    # папки: по каждому отслеживаемому курсу спрашиваем имя (Enter - взять id курса)
-    print("\nИмя локальной папки для каждого курса (Enter - взять id курса из ТУИС):")
-    codes = {}
+    # папки и сдача: по каждому отслеживаемому курсу имя (Enter - id курса) и профиль
+    # (Enter - явный из config.env, а без него - release при репозитории в папке, иначе file)
+    print("\nИмя локальной папки и сдача (release - релиз репозитория со скринкастами, "
+          "file - отчёт файлом) для каждого курса:")
+    codes, flows = {}, {}
     for r in rows_:
         if r["id"] in ignore_ids:
             continue
         default = r["code"] or str(r["id"])
-        codes[r["id"]] = input(f"  {r['title'][:50]} [{default}]: ").strip() or default
+        code = input(f"  {r['title'][:50]} [{default}]: ").strip() or default
+        codes[r["id"]] = code
+        guess = r["flow"] or local.flow_of(cfg, code)   # папку могли только что назвать
+        ans = input(f"    сдача, release|file [{guess}]: ").strip().lower()
+        flows[r["id"]] = {"r": "release", "f": "file"}.get(ans[:1], guess)
 
-    cfg.write_courses(ignore_ids, codes)
+    cfg.write_courses(ignore_ids, codes, flows)
     titles = {r["id"]: r["title"] for r in rows_}
     notes = []
     for cid, code in codes.items():
-        (ROOT / code / "stash").mkdir(parents=True, exist_ok=True)
-        (ROOT / code / "tuis").mkdir(parents=True, exist_ok=True)
-        if notes_stub(code, cid, titles.get(cid)):
+        (ROOT / code / "stash").mkdir(parents=True, exist_ok=True)   # tuis/ заведёт study answer
+        if notes_stub(code, cid, titles.get(cid), flows[cid]):
             notes.append(code)
-    return {"ignore": sorted(ignore_ids), "code": codes, "notes": notes}
+    return {"ignore": sorted(ignore_ids), "code": codes, "flow": flows, "notes": notes}

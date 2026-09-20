@@ -81,13 +81,25 @@ class ConfigTest(unittest.TestCase):
                          [(1, "one", "Один"), (3, None, "")])
 
     def test_write_courses(self):
-        cfg = self.write("A=1\nCOURSE_IGNORE=1\nCODE 5 five\nCOURSE 7 x Старое\n# CODE 8 keep\n")
-        cfg.write_courses({3}, {5: "five", 8: "eight"})
+        cfg = self.write("A=1\nCOURSE_IGNORE=1\nCODE 5 five\nCOURSE 7 x Старое\n# CODE 8 keep\n"
+                         "FLOW 5 file\nFLOW 7 release\n")
+        self.assertEqual(cfg.flows(), {5: "file", 7: "release"})
+        cfg.write_courses({3}, {5: "five", 8: "eight"})   # без flows — прежние, но только с папкой
         self.assertEqual(self.path.read_text(encoding="utf-8"),
-                         "A=1\n# CODE 8 keep\nCOURSE_IGNORE=3\nCODE 5 five\nCODE 8 eight\n")
+                         "A=1\n# CODE 8 keep\nCOURSE_IGNORE=3\nCODE 5 five\nCODE 8 eight\n"
+                         "FLOW 5 file\n")
         if os.name == "posix":
             self.assertEqual(oct(self.path.stat().st_mode)[-3:], "600")
         self.assertEqual(Config(self.path).codes(), {5: "five", 8: "eight"})
+        cfg.write_courses({3}, {5: "five", 8: "eight"}, {5: "release", 8: "file"})
+        self.assertTrue(self.path.read_text(encoding="utf-8")
+                        .endswith("CODE 8 eight\nFLOW 5 release\nFLOW 8 file\n"))
+        self.assertEqual(Config(self.path).flows(), {5: "release", 8: "file"})
+
+    def test_flow_bad_value(self):
+        with self.assertRaises(StudyError) as e:
+            self.write("CODE 5 five\nFLOW 5 git\n")
+        self.assertIn("FLOW 5: ожидается release или file", e.exception.message)
 
 
 if __name__ == "__main__":

@@ -12,6 +12,10 @@ from typing import Optional
 HERE = pathlib.Path(__file__).resolve().parents[2]     # каталог .digest/ (src/study/config.py)
 ROOT = HERE.parent                                     # ~/work/study
 
+# Профиль сдачи курса (строка FLOW): release — репозиторий курса по регламенту преподавателя,
+# git-flow, релиз с файлами на обоих хостингах, скринкасты, `study answer`; file — отчёт файлом.
+FLOWS = ("release", "file")
+
 DEFAULTS = {
     "TUIS_URL": "https://esystem.rudn.ru",
     # Токены — строками TUIS_TOKEN=… в config.env. Rutube ведёт свои файлы сам (см. rutube.py);
@@ -101,6 +105,7 @@ class Config:
         self.path = pathlib.Path(path) if path else HERE / "config.env"
         self._values = {}
         self._codes = {}         # CODE <id> <code>: id → имя локальной папки
+        self._flows = {}         # FLOW <id> release|file: как сдаётся курс
         self._ignore = set()     # COURSE_IGNORE: id, которые не отслеживаем
         self._tokens = {}
         self._read()
@@ -115,6 +120,11 @@ class Config:
             parts = line.split(None, 2)
             if parts[0] == "CODE" and len(parts) == 3 and parts[1].isdigit():
                 self._codes[int(parts[1])] = parts[2].strip()
+            elif parts[0] == "FLOW" and len(parts) == 3 and parts[1].isdigit():
+                if parts[2].strip() not in FLOWS:
+                    raise StudyError("config", f"FLOW {parts[1]}: ожидается {' или '.join(FLOWS)}, "
+                                               f"а не «{parts[2].strip()}»")
+                self._flows[int(parts[1])] = parts[2].strip()
             elif "=" in line:
                 key, _, value = line.partition("=")
                 self._values[key.strip()] = value.strip()
@@ -157,19 +167,27 @@ class Config:
         """Карта CODE: id курса → имя локальной папки."""
         return dict(self._codes)
 
+    def flows(self):
+        """Карта FLOW: id курса → профиль сдачи; курса нет — профиль угадывает `local.flow_of`."""
+        return dict(self._flows)
+
     def track(self, courses):
         """Из списка moodle.courses() (id/fullname) — отслеживаемые Course минус игнор."""
         return [Course(c["id"], self._codes.get(c["id"]), c.get("fullname") or "")
                 for c in courses if c["id"] not in self._ignore]
 
-    def write_courses(self, ignore_ids, codes):
-        """Переписать в config.env строки COURSE_IGNORE и CODE (и убрать старые COURSE)."""
+    def write_courses(self, ignore_ids, codes, flows=None):
+        """Переписать в config.env строки COURSE_IGNORE, CODE и FLOW (и убрать старые COURSE);
+        без `flows` прежние FLOW сохраняются, FLOW пишется только курсам с папкой."""
+        flows = self._flows if flows is None else flows
+        flows = {cid: f for cid, f in flows.items() if cid in codes}
         keep = [ln for ln in self.path.read_text(encoding="utf-8").splitlines()
-                if not re.match(r"\s*(COURSE_IGNORE\s*=|CODE\s|COURSE\s)", ln)]
+                if not re.match(r"\s*(COURSE_IGNORE\s*=|CODE\s|COURSE\s|FLOW\s)", ln)]
         keep.append("COURSE_IGNORE=" + " ".join(str(i) for i in sorted(ignore_ids)))
         keep += [f"CODE {cid} {code}" for cid, code in sorted(codes.items())]
+        keep += [f"FLOW {cid} {flow}" for cid, flow in sorted(flows.items())]
         self._write(keep)
-        self._ignore, self._codes = set(ignore_ids), dict(codes)
+        self._ignore, self._codes, self._flows = set(ignore_ids), dict(codes), dict(flows)
 
     def _write(self, lines):
         """config.env целиком, с правами 600 с момента создания."""

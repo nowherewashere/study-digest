@@ -25,7 +25,7 @@ try:
 except ImportError:   # не Windows
     winreg = None
 
-from . import agent, courses, files
+from . import agent, courses, files, local
 from .config import HERE, ROOT, StudyError
 from .moodle import Moodle
 from .snapshot import load_state
@@ -261,10 +261,9 @@ def dirs(s, cfg):
     codes = cfg.codes()
     titles = load_state(cfg).get("courses") or {}   # сети на этом шаге нет — названия из снимка
     for cid, code in codes.items():
-        for sub in ("stash", "tuis"):
-            (ROOT / code / sub).mkdir(parents=True, exist_ok=True)
-        made = courses.notes_stub(code, cid, titles.get(str(cid)))
-        s.ok(f"{ROOT / code}{os.sep}{{stash,tuis" + (",NOTES.md}" if made else "}"))
+        (ROOT / code / "stash").mkdir(parents=True, exist_ok=True)   # tuis/ заведёт study answer
+        made = courses.notes_stub(code, cid, titles.get(str(cid)), local.flow_of(cfg, code))
+        s.ok(f"{ROOT / code}{os.sep}{{stash" + (",NOTES.md}" if made else "}"))
     if not codes:
         s.note("папки курсов появятся на шаге «Курсы»")
 
