@@ -278,7 +278,7 @@ MSYS_NO_PATHCONV=1 wsl.exe -d <дистрибутив> -- bash -c '~/work/study/
 | `study calendar [--days N]` | события календаря (только дедлайны) |
 | `study grades [--course id\|код]` | баллы |
 | `study status <id-задания>` | состояние ответа на задание |
-| `study files [<курс>] [--pull] [--all] [--force]` | файлы курса: что появилось, забрать в `stash/`; без курса — по всем папкам из `config.env`, строкой на курс |
+| `study files [<курс>] [--pull] [--all] [--force]` | файлы курса: что появилось, забрать в `stash/`; перезалитый в ТУИС файл перекачивается поверх копии (mtime копии = `timemodified` из ТУИС); `--force` — всё заново; без курса — по всем папкам из `config.env`, строкой на курс |
 | `study upload <файл>… [--itemid N]` | загрузка вложений, печатает `itemid` |
 | `study submit <id> [--text F] [--files <itemid>] --confirm` | отправка ответа; без `--confirm` — план и код возврата 1 |
 | `study functions [подстрока]` · `study call <функция> [ключ=значение …]` | ручки Moodle и произвольный вызов; повтор ключа — массив: `options[ids][0]=101` |

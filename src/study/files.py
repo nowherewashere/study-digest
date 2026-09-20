@@ -4,6 +4,8 @@
 не всё подряд: только документы и только до потолка по размеру, иначе в stash
 натечёт то, что там не нужно.
 """
+import contextlib
+import os
 import pathlib
 import re
 import sys
@@ -85,6 +87,8 @@ def listing(cfg, moodle, course, since=None, everything=False):
                 size = c.get("filesize") or 0
                 ext = pathlib.Path(name).suffix.lower()
                 have = present(into, name)
+                # перезалитый файл: в ТУИС новее, чем копия на диске (mtime = timemodified)
+                newer = bool(have) and (c.get("timemodified") or 0) > int(have.stat().st_mtime)
                 skip = None
                 if not size:
                     # mod_page отдаёт index.html с нулевым размером — это страница, не файл
@@ -97,7 +101,7 @@ def listing(cfg, moodle, course, since=None, everything=False):
                         "modified": moment(c.get("timemodified")),
                         "url": c["fileurl"], "section": sec.get("name"),
                         "module": m.get("name"), "modname": m.get("modname"),
-                        "path": str(have or into / name), "have": bool(have),
+                        "path": str(have or into / name), "have": bool(have), "newer": newer,
                         "new": fresh(m, c, since, known), "skip": skip}
                 if everything or item["new"]:
                     out.append(item)
@@ -125,26 +129,36 @@ class Progress:
             self.out.flush()
 
 
+def wanted(f, force=False):
+    """Качать: прошёл фильтр и (нет на диске, либо в ТУИС новее, либо --force)."""
+    return not f["skip"] and (force or not f["have"] or f["newer"])
+
+
 def pull(moodle, data, force=False, progress=None):
-    """Скачивает то, что прошло фильтр и ещё не лежит в stash; `progress(курс, текст)` — ход."""
-    into = pathlib.Path(data["stash"])
+    """Скачивает то, что прошло фильтр и чего нет в stash или что там устарело;
+    `progress(курс, текст)` — ход. Копия ложится на место старой (и в подкаталог, если она там),
+    mtime = timemodified из ТУИС: так «новее» не зависит от часов сервера и машины."""
     label = data["course"]["code"] or data["course"]["id"]
-    todo = [f for f in data["files"] if not f["skip"] and (force or not f["have"])]
+    todo = [f for f in data["files"] if wanted(f, force)]
     got, errors = [], []
     for i, f in enumerate(todo, 1):
         if progress:
             progress(label, f"{i}/{len(todo)} {f['name']}")
-        dest = into / f["name"]
+        dest = pathlib.Path(f["path"])
         try:
             body = moodle.download(f["url"])
         except StudyError as e:
             errors.append({**e.as_dict(), "where": f["name"]})
             continue
-        into.mkdir(parents=True, exist_ok=True)
+        dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(body)
-        f["have"] = True
+        if f["modified"]:
+            with contextlib.suppress(OSError):
+                os.utime(dest, (f["modified"]["ts"], f["modified"]["ts"]))
+        f["updated"], f["have"], f["newer"] = f["have"], True, False
         f["pulled"] = len(body)
-        got.append({"name": f["name"], "bytes": len(body), "path": str(dest)})
+        got.append({"name": f["name"], "bytes": len(body), "path": str(dest),
+                    "updated": f["updated"]})
     data["pulled"] = got
     data["errors"] = errors
     return data
@@ -159,14 +173,32 @@ def walk(cfg, moodle, do_pull=False, everything=False, force=False, progress=Non
         yield pull(moodle, d, force=force, progress=progress) if do_pull else d
 
 
+def pulled_line(d):
+    """«скачано N, из них обновлено M, не удалось K»."""
+    got = d.get("pulled") or []
+    upd, bad = sum(1 for g in got if g.get("updated")), len(d.get("errors") or [])
+    return (f"скачано {len(got)}" + (f", из них обновлено {upd}" if upd else "")
+            + (f", не удалось {bad}" if bad else ""))
+
+
 def summary(d, pulled=False):
     """Одна строка на курс для прохода по всем: сколько новых, скачано, пропущено."""
-    can = [f for f in d["files"] if not f["skip"] and not f["have"]]
+    can = [f for f in d["files"] if wanted(f)]
     label = d["course"]["code"] or d["course"]["id"]
     if pulled:
-        got, bad = len(d.get("pulled") or []), len(d.get("errors") or [])
-        return f"{label}: скачано {got}" + (f", не удалось {bad}" if bad else "")
+        return f"{label}: {pulled_line(d)}"
     return f"{label}: {len(can)} к загрузке" if can else f"{label}: нового нет"
+
+
+def mark(f):
+    """Отметка файла в списке."""
+    if f.get("pulled"):
+        return "обновлён" if f.get("updated") else "скачан"
+    if f["skip"]:
+        return "пропущен: " + f["skip"]
+    if f["newer"]:
+        return "есть, в ТУИС новее"
+    return "уже есть" if f["have"] else "можно забрать"
 
 
 def render(d, pulled=False):
@@ -180,17 +212,15 @@ def render(d, pulled=False):
         return "\n".join(out)
     out.append("")
     for f in d["files"]:
-        mark = "скачан" if f.get("pulled") else ("пропущен: " + f["skip"] if f["skip"]
-                                                 else "уже есть" if f["have"] else "можно забрать")
         out.append("  {:<16} {:>8} КБ  {:<12} {}".format(
-            f["modified"]["full"] if f["modified"] else "—", f["size"] // 1024, mark, f["name"]))
+            f["modified"]["full"] if f["modified"] else "—", f["size"] // 1024, mark(f), f["name"]))
         out.append("             {} · {}".format(f["section"] or "—", f["module"] or "—"))
     if pulled:
-        out.append("\nСкачано: {} файл(ов) в {}".format(len(d.get("pulled") or []), d["stash"]))
+        out.append("\nВ {}: {}".format(d["stash"], pulled_line(d)))
         for e in d.get("errors") or []:
             out.append("  не удалось: {} — {}".format(e.get("where"), e["message"]))
     else:
-        can = [f for f in d["files"] if not f["skip"] and not f["have"]]
+        can = [f for f in d["files"] if wanted(f)]
         if can:
             out.append("\nЗабрать: study files {} --pull".format(
                 d["course"]["code"] or d["course"]["id"]))

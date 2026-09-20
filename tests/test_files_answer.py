@@ -1,4 +1,5 @@
 import json
+import os
 import unittest
 
 from study import answer, files, local
@@ -68,19 +69,44 @@ class FilesTest(unittest.TestCase):
     def test_pull(self):
         self.stash.mkdir(parents=True)
         (self.stash / "lecture-01.pptx").write_bytes(b"old")
+        os.utime(self.stash / "lecture-01.pptx", (NOW, NOW))   # копия свежее, чем в ТУИС
         d = files.listing(self.cfg, self.m, self.course, since=SINCE, everything=True)
         self.net.reply("GET", "002-dns.pdf?forcedownload=1&token=test-token", b"%PDF-2")
         out = files.pull(self.m, d)
-        self.assertEqual(out["pulled"], [{"name": "002-dns.pdf", "bytes": 6,
+        self.assertEqual(out["pulled"], [{"name": "002-dns.pdf", "bytes": 6, "updated": False,
                                           "path": str(self.stash / "002-dns.pdf")}])
         self.assertEqual((self.stash / "002-dns.pdf").read_bytes(), b"%PDF-2")
+        self.assertEqual(int((self.stash / "002-dns.pdf").stat().st_mtime), 1789531200)
         self.assertEqual((self.stash / "lecture-01.pptx").read_bytes(), b"old")   # без force
         self.assertEqual(out["errors"], [])
         text = files.render(out, pulled=True)
         self.assertIn("скачан       002-dns.pdf", text)
         self.assertIn("уже есть     lecture-01.pptx", text)
         self.assertIn("пропущен: тип .mp4 video.mp4", text)
-        self.assertIn("Скачано: 1 файл(ов)", text)
+        self.assertIn(f"В {self.stash}: скачано 1", text)
+
+    def test_pull_refreshes_newer(self):
+        # копия в подкаталоге старее, чем в ТУИС (перезалили) — перекачать на место, без --force
+        old = self.stash / "old" / "lecture-01.pptx"
+        old.parent.mkdir(parents=True)
+        old.write_bytes(b"old")
+        os.utime(old, (1789279200 - 100, 1789279200 - 100))
+        d = files.listing(self.cfg, self.m, self.course, since=SINCE, everything=True)
+        row = next(f for f in d["files"] if f["name"] == "lecture-01.pptx")
+        self.assertTrue(row["newer"])
+        self.assertIn("есть, в ТУИС новее lecture-01.pptx", files.render(d))
+        self.assertEqual(files.summary(d), "nettech: 2 к загрузке")   # 002-dns.pdf и она
+        self.net.reply("GET", "002-dns.pdf?forcedownload=1&token=test-token", b"%PDF-2")
+        self.net.reply("GET", "lecture-01.pptx?token=test-token", b"new")
+        out = files.pull(self.m, d)
+        self.assertEqual([(g["name"], g["updated"]) for g in out["pulled"]],
+                         [("002-dns.pdf", False), ("lecture-01.pptx", True)])
+        self.assertEqual((old.read_bytes(), int(old.stat().st_mtime)), (b"new", 1789279200))
+        self.assertFalse((self.stash / "lecture-01.pptx").exists())   # не вторая копия наверху
+        text = files.render(out, pulled=True)
+        self.assertIn("обновлён     lecture-01.pptx", text)
+        self.assertIn("скачано 2, из них обновлено 1", text)
+        self.assertEqual(files.summary(out, pulled=True), "nettech: скачано 2, из них обновлено 1")
 
     def test_pull_force_and_error(self):
         self.stash.mkdir(parents=True)
