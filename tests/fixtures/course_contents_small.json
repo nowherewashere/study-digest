@@ -38,6 +38,21 @@
       "dataid": "duedate"
      }
     ]
+   },
+   {
+    "id": 212,
+    "name": "Пересдача лабораторной работы № 1",
+    "modname": "assign",
+    "visible": 1,
+    "uservisible": false,
+    "availabilityinfo": "Недоступно, пока не выполнено условие",
+    "dates": [
+     {
+      "label": "Срок сдачи:",
+      "timestamp": 1790283540,
+      "dataid": "duedate"
+     }
+    ]
    }
   ]
  }

@@ -14,6 +14,8 @@ class NamesTest(unittest.TestCase):
                          {"work": "hw", "num": "1", "topic": "Кодирование"})
         self.assertEqual(fmt.parse_name("Выбрать тему доклада к лекции 3")["work"], "topic")
         self.assertEqual(fmt.parse_name("Сдать доклад. Лекция 4")["work"], "talk")
+        self.assertEqual(fmt.parse_name("Пересдача лабораторной работы № 3"),
+                         {"work": "retake", "num": "3", "topic": ""})
         self.assertIsNone(fmt.parse_name("Тест после лекции №1"))
         self.assertIsNone(fmt.parse_name(None))
 
@@ -22,6 +24,7 @@ class NamesTest(unittest.TestCase):
         self.assertEqual(fmt.short_name(name), "ЛР 2 — Простые сети")
         self.assertEqual(fmt.short_name(name, tail=False), "ЛР 2")
         self.assertEqual(fmt.short_name("Доклад к лекции 4"), "Доклад к лекции 4")
+        self.assertEqual(fmt.short_name("Пересдача лабораторной работы № 3"), "Пересдача ЛР 3")
         self.assertEqual(fmt.short_name("<b>Тест</b> &amp; ещё"), "Тест & ещё")
         self.assertEqual(len(fmt.short_name("x" * 100)), 61)   # 60 символов и многоточие
 

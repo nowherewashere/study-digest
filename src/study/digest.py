@@ -38,10 +38,16 @@ def soft(errors, where):
         errors.append({**e.as_dict(), "where": where})
 
 
-def lab_number(name):
+def news(course, m, section, what):
+    """Строка «Новое в курсах» для модуля курса."""
+    return {"course": course, "section": section, "item": m["name"],
+            "modname": m.get("modname", ""), "files": [], "what": what}
+
+
+def lab_number(name, work="lab"):
     """Номер лабы из названия задания (labNN); у домашних и докладов каталога нет."""
     p = parse_name(name)
-    return p["num"].zfill(2) if p and p["work"] == "lab" else None
+    return p["num"].zfill(2) if p and p["work"] == work else None
 
 
 def by_due(items):
@@ -64,6 +70,7 @@ class Collector:
         self.courses = {c.id: c for c in cfg.track(moodle.courses())}
         self.ignore = cfg.ignore()   # решение пользователя: этих курсов в сводке нет вовсе
         self.assigns = {}       # id задания → строка сводки (для снимка)
+        self.asked = set()      # задания, чей статус уже запрошен
         self.soon, self.overdue = [], []
         self._contents = {}
 
@@ -99,11 +106,12 @@ class Collector:
                         "cmid": a["cmid"], "course": self.course(c["id"]), "name": a["name"],
                         "short": short_name(a["name"]), "due": moment(a.get("duedate"), self.now),
                         "submission": None, "intro": plain(a.get("intro")),
-                        "lab": lab_number(a["name"])}
+                        "lab": lab_number(a["name"]), "retake": lab_number(a["name"], "retake")}
                 self.assigns[str(a["id"])] = item
                 due = a.get("duedate") or 0
                 prev = self.known.get(str(a["id"]))
-                if self.since and prev is None:
+                # пересдача — не новость: новостью была сама лаба
+                if self.since and prev is None and not item["retake"]:
                     new.append(item)
                 elif prev is not None and due and prev != due:
                     moved.append({**item, "was": moment(prev, self.now)})
@@ -114,13 +122,38 @@ class Collector:
                 elif due < self.now <= due + MONTH:
                     self.overdue.append(item)
 
-        for item in by_due(self.soon + self.overdue):
-            with self.soft(f"статус задания {item['assign_id']}"):
-                st = self.moodle.submission_status(item["assign_id"])
-                sub = (st.get("lastattempt") or {}).get("submission") or {}
-                item["submission"] = sub.get("status") or "new"
-                item["grade"] = ((st.get("feedback") or {}).get("grade") or {}).get("grade")
+        live = by_due(self.soon + self.overdue)
+        for item in live:
+            if not item["retake"]:
+                self.status(item)
+        self.retakes([a for a in live if a["retake"]])
         return new, moved
+
+    def status(self, item):
+        """Состояние ответа и оценка из mod_assign_get_submission_status — один раз на задание."""
+        if item["assign_id"] in self.asked:
+            return
+        self.asked.add(item["assign_id"])
+        with self.soft(f"статус задания {item['assign_id']}"):
+            st = self.moodle.submission_status(item["assign_id"])
+            sub = (st.get("lastattempt") or {}).get("submission") or {}
+            item["submission"] = sub.get("status") or "new"
+            item["grade"] = ((st.get("feedback") or {}).get("grade") or {}).get("grade")
+
+    def retakes(self, items):
+        """Пересдача нужна, только если оригинал просрочен, не сдан и не оценен; иначе это
+        не срок, а запасной выход, и в сроки она не идёт. Оригинал без пары — считаем нужной."""
+        labs = {(a["course"]["id"], a["lab"]): a for a in self.assigns.values() if a["lab"]}
+        for r in items:
+            orig = labs.get((r["course"]["id"], r["retake"]))
+            r["retake_of"] = orig["assign_id"] if orig else None
+            if orig:
+                self.status(orig)   # оригинал может быть старше окна — статус ещё не брали
+            r["needed"] = orig is None or (orig["submission"] != "submitted"
+                                           and orig.get("grade") is None
+                                           and (not orig["due"] or orig["due"]["overdue"]))
+            if r["needed"] and r["source"] == "assign_api":
+                self.status(r)
 
     def activities(self):
         """Элементы курса со сроками — ловят задания, скрытые ограничением доступа.
@@ -140,7 +173,10 @@ class Collector:
                                 "course": self.course(cid), "name": m["name"],
                                 "short": short_name(m["name"]), "due": moment(ts, self.now),
                                 "submission": "hidden" if m["modname"] == "assign" else None,
-                                "intro": "", "lab": lab_number(m["name"])})
+                                "intro": "", "lab": lab_number(m["name"]),
+                                "retake": lab_number(m["name"], "retake")})
+        # скрытая пересдача сданной лабы — тоже не срок
+        self.retakes([a for a in self.soon if a["source"] == "course_contents" and a["retake"]])
 
     def choices(self):
         """Выбор темы доклада: сам срок ничего не говорит, важно, выбрана ли тема."""
@@ -202,27 +238,22 @@ class Collector:
                        for m in sec.get("modules", [])}
             known = self.files.get(str(cid)) if self.files is not None else None
             known = set(known) if known is not None else None
-            rows = {}
-
-            def row(mid, m, section, what):
-                return rows.setdefault(mid, {
-                    "course": self.course(cid), "section": section, "item": m["name"],
-                    "modname": m.get("modname", ""), "files": [], "what": what})
-
+            rows, course = {}, self.course(cid)
             for u in changed:
                 kinds = {x["name"] for x in u["updates"]} & USEFUL
                 if not kinds:
                     continue
                 m, section = modules.get(u["id"], ({"name": f"(модуль {u['id']})"}, ""))
-                row(u["id"], m, section,
-                    "новые файлы" if kinds & FILES else "изменены настройки")
+                rows[u["id"]] = news(course, m, section,
+                                     "новые файлы" if kinds & FILES else "изменены настройки")
             # имена файлов — чтобы сводка говорила «появился 002-dns.pdf», а не «новые файлы»
             for mid, (m, section) in modules.items():
                 new_files = [files.safe(c["filename"]) for c in m.get("contents") or []
                              if files.is_file(c) and c.get("filesize")
                              and files.fresh(m, c, self.since, known)]
                 if new_files:
-                    row(mid, m, section, "новые файлы")["files"] = new_files
+                    rows.setdefault(mid, news(course, m, section, "новые файлы"))
+                    rows[mid]["files"] = new_files
             out.extend(rows.values())
         return out
 
@@ -292,8 +323,8 @@ class Collector:
         new, moved = self.assignments()
         self.activities()
         self.choices()
-        deadlines = by_due(self.soon)
-        overdue = by_due(self.overdue)
+        deadlines = [a for a in by_due(self.soon) if a.get("needed", True)]
+        overdue = [a for a in by_due(self.overdue) if a.get("needed", True)]
         return {
             "schema": 1, "now": moment(self.now, self.now), "days": self.days,
             "first_run": not self.since,
@@ -305,6 +336,10 @@ class Collector:
             # просроченное и несданное — впереди: пересдача всё ещё стоит баллов
             "not_started": [a for a in overdue + deadlines
                             if a["source"] == "assign_api" and a["submission"] == "new"],
+            "retakes": [{"assign_id": a.get("assign_id"), "cmid": a["cmid"], "short": a["short"],
+                         "course": a["course"], "due": a["due"], "retake_of": a["retake_of"],
+                         "needed": a["needed"]}
+                        for a in by_due(self.soon + self.overdue) if a.get("retake")],
             "quizzes": self.quizzes(),
             "updates": self.updates(), "new_assignments": new, "moved": moved,
             "notifications": self.notifications(), "grades": self.grades(),

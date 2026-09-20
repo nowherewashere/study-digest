@@ -10,11 +10,12 @@ from study.moodle import Moodle
 from tests.fakes import DAY, NOW, FakeNet, config, fixture, patch, repo, tmpdir
 
 DUE = {-5: 1789160340, -3: 1789333140, -2: 1789419540, 1: 1789678740, 3: 1789851540,
-       10: 1790456340}      # 23:59 через N дней, как в фикстурах
+       8: 1790283540, 10: 1790456340}      # 23:59 через N дней, как в фикстурах
 STATE = {"last_run": NOW - DAY,
          # 13 нет — новое задание; у 12 срок был на день раньше — сдвинут
          "assignments": {"11": DUE[3], "12": DUE[-3], "14": 0, "15": DUE[1], "16": 1793393940,
-                         "17": 1785704340, "21": DUE[10]},
+                         "17": 1785704340, "18": DUE[8], "19": 1785704340, "20": DUE[8],
+                         "21": DUE[10]},
          "courses": {"1": "Сетевые технологии", "2": "Вычислительные методы"},
          "grades": {"1": {"Сдать отчет по лабораторной работе № 1. Vagrant и Packer": 8.0}}}
 KEYS = {"1": ["121/002-dns.pdf", "122/big.zip", "122/lecture-01.pptx", "122/video.mp4",
@@ -26,8 +27,9 @@ def queue(net, since=True):
     net.reply("POST", "core_webservice_get_site_info", fixture("site_info"))
     net.reply("POST", "core_enrol_get_users_courses", fixture("users_courses"))
     net.reply("POST", "mod_assign_get_assignments", fixture("assignments"))
+    # 18 (пересдача сданной ЛР 2) статуса не запрашивает: ответа нет, и done() это проверит
     for aid, status in ((13, "new"), (12, "submitted"), (15, "new"), (11, "new"),
-                        (21, "submitted")):
+                        (21, "submitted"), (19, "new"), (20, "new")):
         net.reply("POST", ("mod_assign_get_submission_status", f"assignid={aid}"),
                   fixture(f"submission_status_{status}"))
     net.reply("POST", ("core_course_get_contents", "courseid=1"), fixture("course_contents"))
@@ -98,11 +100,12 @@ class CollectorTest(DigestCase):
         self.assertEqual([x["id"] for x in d["courses"]], [1, 2])   # скрытый 3 и игнор 4 — нет
         self.assertEqual(names(d["deadlines"]),
                          ["ЛР 3 — DHCP", "ЛР 1 — Vagrant и Packer", "Тема доклада к лекции 1",
-                          "Доклад к лекции 1", "Опрос о курсе", "ЛР 1"])
+                          "Доклад к лекции 1", "Опрос о курсе", "Пересдача ЛР 5", "ЛР 1"])
         self.assertEqual(names(d["overdue"]), ["ДЗ 1 — Кодирование"])
         self.assertEqual(names(d["submitted"]), ["ЛР 2 — DNS"])
         self.assertEqual(names(d["not_started"]),
-                         ["ДЗ 1 — Кодирование", "ЛР 3 — DHCP", "ЛР 1 — Vagrant и Packer"])
+                         ["ДЗ 1 — Кодирование", "ЛР 3 — DHCP", "ЛР 1 — Vagrant и Packer",
+                          "Пересдача ЛР 5"])
         self.assertEqual(names(d["new_assignments"]), ["ДЗ 1 — Кодирование"])
         self.assertEqual([(a["short"], a["was"]["ts"], a["due"]["ts"]) for a in d["moved"]],
                          [("ЛР 2 — DNS", DUE[-3], DUE[-2])])
@@ -128,6 +131,20 @@ class CollectorTest(DigestCase):
         pick = next(a for a in d["deadlines"] if a.get("modname") == "choice")
         self.assertEqual((pick["choice"]["chosen"], pick["submission"]), ("Тема Б", "submitted"))
         self.assertNotIn("Тема доклада", digest.render_digest(d))   # выбранная — как сданная
+
+    def test_retakes(self):
+        # ЛР 2 сдана — её пересдача не срок; ЛР 5 старше окна, не сдана — пересдача нужна
+        _, d = self.collect()
+        # скрытая пересдача ЛР 1 курса 2 (из состава курса): ЛР 1 сдана — не срок
+        self.assertEqual([(r["short"], r["retake_of"], r["needed"]) for r in d["retakes"]],
+                         [("Пересдача ЛР 2", 12, False), ("Пересдача ЛР 5", 19, True),
+                          ("Пересдача ЛР 1", 21, False)])
+        self.assertIn("Пересдача ЛР 5", names(d["deadlines"]))
+        self.assertNotIn("Пересдача ЛР 2", names(d["deadlines"]) + names(d["not_started"]))
+        self.assertNotIn("Пересдача", names(d["new_assignments"]))
+        self.assertEqual(self.net.calls("mod_assign_get_submission_status").count(
+            {"wstoken": "test-token", "wsfunction": "mod_assign_get_submission_status",
+             "moodlewsrestformat": "json", "assignid": "19"}), 1)
 
     def test_quizzes_updates_notifications(self):
         _, d = self.collect()
@@ -223,6 +240,7 @@ class CollectorTest(DigestCase):
         self.assertEqual(s["last_run"], NOW)
         self.assertEqual(s["assignments"], {"11": DUE[3], "12": DUE[-2], "13": DUE[-5], "14": 0,
                                             "15": DUE[1], "16": 1793393940, "17": 1785704340,
+                                            "18": DUE[8], "19": 1785704340, "20": DUE[8],
                                             "21": DUE[10]})
         self.assertEqual(s["courses"], {"1": "Сетевые технологии", "2": "Вычислительные методы"})
         self.assertEqual(s["grades"], {"1": {"Сдать отчет по лабораторной работе № 1. Vagrant и "

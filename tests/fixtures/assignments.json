@@ -95,6 +95,45 @@
      "intro": "<p>Контрольная работа</p>",
      "introformat": 1,
      "grade": 10
+    },
+    {
+     "id": 18,
+     "cmid": 125,
+     "course": 1,
+     "name": "Пересдача лабораторной работы № 2",
+     "duedate": 1790283540,
+     "allowsubmissionsfromdate": 0,
+     "cutoffdate": 0,
+     "submissiondrafts": 0,
+     "intro": "<p>Пересдача лабораторной работы № 2</p>",
+     "introformat": 1,
+     "grade": 10
+    },
+    {
+     "id": 19,
+     "cmid": 126,
+     "course": 1,
+     "name": "Сдать отчет по лабораторной работе № 5. RIP",
+     "duedate": 1785704340,
+     "allowsubmissionsfromdate": 0,
+     "cutoffdate": 0,
+     "submissiondrafts": 0,
+     "intro": "<p>Сдать отчет по лабораторной работе № 5. RIP</p>",
+     "introformat": 1,
+     "grade": 10
+    },
+    {
+     "id": 20,
+     "cmid": 127,
+     "course": 1,
+     "name": "Пересдача лабораторной работы № 5",
+     "duedate": 1790283540,
+     "allowsubmissionsfromdate": 0,
+     "cutoffdate": 0,
+     "submissiondrafts": 0,
+     "intro": "<p>Пересдача лабораторной работы № 5</p>",
+     "introformat": 1,
+     "grade": 10
     }
    ]
   },
