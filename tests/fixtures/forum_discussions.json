@@ -1,0 +1,31 @@
+{
+ "discussions": [
+  {
+   "id": 501,
+   "name": "Лекция 3 переносится",
+   "subject": "Лекция 3 переносится",
+   "message": "<p>Лекция 3 пройдёт <b>в пятницу</b>, аудитория та же.</p>",
+   "discussion": 501,
+   "userid": 7,
+   "userfullname": "Иванов Иван",
+   "created": 1789527600,
+   "timemodified": 1789527600,
+   "numreplies": 0,
+   "pinned": false
+  },
+  {
+   "id": 500,
+   "name": "Консультация перед ЛР 3",
+   "subject": "Консультация перед ЛР 3",
+   "message": "<p>В четверг в 18:00.</p>",
+   "discussion": 500,
+   "userid": 7,
+   "userfullname": "Иванов Иван",
+   "created": 1789279200,
+   "timemodified": 1789279200,
+   "numreplies": 1,
+   "pinned": false
+  }
+ ],
+ "warnings": []
+}

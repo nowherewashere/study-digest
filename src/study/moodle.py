@@ -56,6 +56,21 @@ class Moodle:
     def submission_status(self, assignid):
         return self.call("mod_assign_get_submission_status", assignid=assignid)
 
+    def forums(self, courseids):
+        return self.call("mod_forum_get_forums_by_courses", courseids=courseids)
+
+    def discussions(self, forumid, perpage=10):
+        """Последние обсуждения форума; на старом Moodle ручка зовётся *_paginated."""
+        try:
+            out = self.call("mod_forum_get_forum_discussions", forumid=forumid, page=0,
+                            perpage=perpage)
+        except StudyError as e:
+            if e.code != "invalidrecord":
+                raise
+            out = self.call("mod_forum_get_forum_discussions_paginated", forumid=forumid,
+                            sortby="timemodified", sortdirection="DESC", page=0, perpage=perpage)
+        return out.get("discussions", [])
+
     def contents(self, courseid):
         # состав курса нужен и сводке, и выгрузке файлов — второй раз не ходим
         if courseid not in self._contents:

@@ -76,6 +76,8 @@ class Collector:
         self.files = state.get("files")               # {курс: [cmid/файл]}; None — нет состава
         self.seen_courses = state.get("courses")      # {id: название}; None — снимка нет
         self.fb = state.get("feedback")               # {id задания: отзыв}; None — снимка нет
+        self.announced = state.get("announcements")   # {курс: [id обсуждений]}; None — нет
+        self._forums = {}                             # курс → [id обсуждений], что прочитали
         self.errors = list(errors)                    # с чем пришёл снимок
         self.courses = {c.id: c for c in cfg.track(moodle.courses())}
         self.ignore = cfg.ignore()   # решение пользователя: этих курсов в сводке нет вовсе
@@ -270,6 +272,33 @@ class Collector:
             out.extend(rows.values())
         return out
 
+    def announcements(self):
+        """Новые записи в форумах объявлений (type news) — против снимка по id, а не по дате:
+        правки и задним числом написанные посты тоже видны. Старый снимок — по времени."""
+        out = []
+        if not self.since:
+            return out
+        forums = []
+        with self.soft("форумы"):
+            forums = [f for f in self.moodle.forums(list(self.courses)) if f.get("type") == "news"]
+        for f in forums:
+            cid = f.get("course")
+            if cid not in self.courses:
+                continue
+            with self.soft(f"объявления курса {cid}"):
+                known = (self.announced or {}).get(str(cid))
+                seen = self._forums.setdefault(cid, [])
+                for d in self.moodle.discussions(f["id"]):
+                    seen.append(d["id"])
+                    ts = d.get("timemodified") or d.get("created") or 0
+                    if (d["id"] not in known) if known is not None else ts > self.since:
+                        out.append({"id": d["id"], "course": self.course(cid),
+                                    "at": moment(ts, self.now),
+                                    "subject": plain(d.get("subject") or d.get("name"), 120),
+                                    "author": d.get("userfullname") or "",
+                                    "text": plain(d.get("message"), 200)})
+        return sorted(out, key=lambda a: -a["at"]["ts"])
+
     def notifications(self):
         """Непрочитанные уведомления, пришедшие после прошлого запуска, без автоматических."""
         out = []
@@ -360,6 +389,7 @@ class Collector:
                          "needed": a["needed"]}
                         for a in by_due(self.soon + self.overdue) if a.get("retake")],
             "quizzes": self.quizzes(),
+            "announcements": self.announcements(),
             "updates": self.updates(), "new_assignments": new, "moved": moved,
             "notifications": self.notifications(), "grades": self.grades(),
             "outside": self.outside(),
@@ -380,6 +410,12 @@ class Collector:
                       if self._contents.get(cid) is not None
                       else (self.files or {}).get(str(cid), [])
                       for cid in self.courses},
+            # объявления: прочитанные форумы дописывают свои id, непрочитанные оставляют прежние
+            "announcements": {str(cid): sorted(set((self.announced or {}).get(str(cid), []))
+                                               | set(self._forums[cid]))[-50:]
+                              if cid in self._forums
+                              else (self.announced or {}).get(str(cid), [])
+                              for cid in self.courses},
             # отзывы: статус запрашивался не у всех — прошлые остаются
             "feedback": {**(self.fb or {}),
                          **{str(a["assign_id"]): a["feedback"] for a in self.assigns.values()
@@ -485,6 +521,10 @@ def deadline_rows(t):
     return rows
 
 
+def announcement(a):
+    return f"**{a['subject']}** · {a['author']}: {a['text']}"
+
+
 def grade_rows(t):
     rows = []
     for g in t.get("grades", []):
@@ -557,6 +597,8 @@ def render(d):
          ["Курс", "Работа", "Отзыв преподавателя"]),
         ("Уведомления", [[n["at"]["text"], n["subject"]] for n in t.get("notifications", [])],
          ["Когда", "Тема"]),
+        ("Объявления", [[a["at"]["text"], label(a), announcement(a)]
+                        for a in t.get("announcements", [])], ["Когда", "Курс", "Тема"]),
         ("Новое в курсах", news, ["Курс", "Раздел", "Что", "Файлы"]),
         ("Сроки в скрытых курсах", outside_rows(t), ["Когда", "Работа", "Курс"]),
     ]

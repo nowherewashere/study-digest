@@ -1,0 +1,42 @@
+[
+ {
+  "id": 31,
+  "course": 1,
+  "type": "news",
+  "name": "Объявления",
+  "intro": "",
+  "cmid": 130,
+  "numdiscussions": 2,
+  "cancreatediscussions": false
+ },
+ {
+  "id": 32,
+  "course": 1,
+  "type": "general",
+  "name": "Вопросы по курсу",
+  "intro": "",
+  "cmid": 131,
+  "numdiscussions": 5,
+  "cancreatediscussions": true
+ },
+ {
+  "id": 33,
+  "course": 2,
+  "type": "news",
+  "name": "Новостной форум",
+  "intro": "",
+  "cmid": 230,
+  "numdiscussions": 0,
+  "cancreatediscussions": false
+ },
+ {
+  "id": 34,
+  "course": 4,
+  "type": "news",
+  "name": "Объявления",
+  "intro": "",
+  "cmid": 430,
+  "numdiscussions": 1,
+  "cancreatediscussions": false
+ }
+]

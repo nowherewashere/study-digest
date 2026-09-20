@@ -32,6 +32,8 @@ Moodle 4.5 на `https://esystem.rudn.ru` (адрес — `TUIS_URL` в `config.
 | `gradereport_user_get_grade_items` | баллы: строки ведомости, `graderaw`/`grademax`, итог курса | `courseid`, `userid` |
 | `core_calendar_get_action_events_by_timesort` | события календаря: сроки всех курсов, в том числе не из `config.env` | `timesortfrom`, `timesortto`, `limitnum` (максимум **50**), дальше — курсор `aftereventid` = `lastid` прошлого ответа. Сдвигать `timesortfrom` нельзя: дедлайны массово стоят в 23:59 одного дня, и события с одинаковым `timesort` на границе страницы теряются |
 | `core_message_get_messages` | уведомления ТУИС (о сроках, о проверке работ) | `useridto`, `type=notifications`, `read=0`, `limitnum` |
+| `mod_forum_get_forums_by_courses` | форумы курсов; объявления — `type: news` | `courseids[]` |
+| `mod_forum_get_forum_discussions` | обсуждения форума (`discussions[]`: `id`, `subject`, `message`, `userfullname`, `timemodified`); на старом Moodle — `mod_forum_get_forum_discussions_paginated`, клиент переключается сам по `invalidrecord` | `forumid`, `page`, `perpage` |
 | `/webservice/upload.php` | загрузка файла в черновую область, возвращает `itemid` | `token`, `filearea=draft`, `itemid`, `file_1=@файл` |
 | `mod_assign_save_submission` | сохранение ответа на задание | `assignmentid`, `plugindata[onlinetext_editor][text]`, `[format]=4`, `[itemid]=0`, `plugindata[files_filemanager]=<itemid>` |
 
@@ -51,7 +53,7 @@ Moodle 4.5 на `https://esystem.rudn.ru` (адрес — `TUIS_URL` в `config.
 | `core_calendar_get_calendar_upcoming_view` | то же в виде готового блока «предстоящее» |
 | `gradereport_user_get_grade_items` | оценки и баллы по курсу |
 | `core_completion_get_activities_completion_status` | отметки о выполнении элементов курса |
-| `mod_forum_get_forums_by_courses`, `mod_forum_add_discussion_post` | форумы и объявления курса |
+| `mod_forum_add_discussion_post` | ответ в форуме (чтение объявлений уже есть) |
 | `core_course_get_courses_by_field` | сведения о курсе по id/короткому имени |
 | `core_files_get_files` | обход файлового хранилища напрямую |
 | `mod_choice_submit_choice_response` | выбрать тему доклада за меня (пока не используется: тему выбирает пользователь) |

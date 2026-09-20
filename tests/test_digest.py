@@ -47,6 +47,12 @@ def queue(net, since=True):
                   fixture("updates_since"))
         net.reply("POST", ("core_course_get_updates_since", "courseid=2"),
                   fixture("updates_since_small"))
+        # форумы: 31 — объявления курса 1, 33 — курса 2 (пусто); 32 — не news, 34 — курс в игноре
+        net.reply("POST", "mod_forum_get_forums_by_courses", fixture("forums"))
+        net.reply("POST", ("mod_forum_get_forum_discussions", "forumid=31"),
+                  fixture("forum_discussions"))
+        net.reply("POST", ("mod_forum_get_forum_discussions", "forumid=33"),
+                  fixture("forum_discussions_empty"))
     net.reply("POST", "core_message_get_messages", fixture("messages"))
     net.reply("POST", ("gradereport_user_get_grade_items", "courseid=1"),
               fixture("grade_items_total"))
@@ -254,6 +260,36 @@ class CollectorTest(DigestCase):
         _, d = run({**STATE, "feedback": {"11": "Переделать раздел 3: нет схемы сети."}})
         self.assertEqual(d["feedback"], [])   # уже видели
 
+    def test_announcements(self):
+        _, d = self.collect()   # снимок без announcements — по времени: только свежее 501
+        self.assertEqual([(a["id"], a["author"], a["text"]) for a in d["announcements"]],
+                         [(501, "Иванов Иван", "Лекция 3 пройдёт в пятницу, аудитория та же.")])
+        # снимок с id: 500 старое, но невиданное — показывается; 501 уже видели
+        _, d = self.collect(state={**STATE, "announcements": {"1": [501], "2": []}})
+        self.assertEqual([a["id"] for a in d["announcements"]], [500])
+        self.assertIn("| 13.09 09:00 | nettech | **Консультация перед ЛР 3** · Иванов Иван: "
+                      "В четверг в 18:00. |", digest.render_digest(d))
+
+    def test_announcements_fallback_and_soft_error(self):
+        queue(self.net)
+        self.net.drop("mod_forum_get_forum_discussions", "forumid=31")
+        self.net.reply("POST", ("mod_forum_get_forum_discussions", "forumid=31"),
+                       {"exception": "x", "errorcode": "invalidrecord", "message": "no"})
+        self.net.reply("POST", ("mod_forum_get_forum_discussions_paginated", "forumid=31",
+                                "sortby=timemodified"), fixture("forum_discussions"))
+        self.net.drop("mod_forum_get_forum_discussions", "forumid=33")
+        self.net.reply("POST", ("mod_forum_get_forum_discussions", "forumid=33"),
+                       {"exception": "x", "errorcode": "invalidrecord", "message": "no"})
+        self.net.reply("POST", ("mod_forum_get_forum_discussions_paginated", "forumid=33"),
+                       {"exception": "x", "errorcode": "dml", "message": "boom"})
+        c = digest.Collector(self.cfg, Moodle(self.cfg), 21,
+                             {**STATE, "announcements": {"1": [], "2": [7]}})
+        d = c.run()
+        self.assertEqual([a["id"] for a in d["announcements"]], [501, 500])
+        self.assertEqual([e["where"] for e in d["errors"]], ["объявления курса 2"])
+        # у курса 2 форум не прочитался — прежний список
+        self.assertEqual(c.snapshot(d)["announcements"], {"1": [500, 501], "2": [7]})
+
     def test_grades_and_outside(self):
         _, d = self.collect()
         g = {x["course"]["id"]: x for x in d["grades"]}
@@ -281,6 +317,7 @@ class CollectorTest(DigestCase):
                                        "2": {"Загрузка 1 лабораторной работы": 10.0}})
         self.assertEqual(s["files"], KEYS)
         self.assertEqual(s["feedback"], {})   # в фикстурах отзывов нет
+        self.assertEqual(s["announcements"], {"1": [500, 501], "2": []})
 
     def test_snapshot_keeps_files_of_unread_course(self):
         queue(self.net)
