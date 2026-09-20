@@ -219,11 +219,15 @@ class Collector:
             with self.soft(f"варианты выбора {cid}"):
                 opts = self.moodle.choice_options(cid)
                 mine = [o["text"] for o in opts if o.get("checked")]
-                a["choice"] = {"chosen": mine[0] if mine else None, "options": len(opts)}
+                # disabled — вариант заполнен (maxanswers) или выбор закрыт: его не предлагать
+                a["choice"] = {"chosen": mine[0] if mine else None,
+                               "options": sum(1 for o in opts if not o.get("disabled"))}
                 a["submission"] = "submitted" if mine else "new"
 
     def quizzes(self):
-        """Тесты с открытым сроком на месяц вперёд — отдельный раздел, не «Сроки»."""
+        """Тесты со сроком закрытия на месяц вперёд — отдельный раздел, не «Сроки»;
+        timeclose = 0 — не срок, как duedate = 0 у задания. abandoned-попытки Moodle
+        считает в лимит наравне с finished — здесь тоже."""
         out = []
         with self.soft("тесты"):
             for q in self.moodle.quizzes(list(self.courses)):
@@ -240,6 +244,8 @@ class Collector:
                         "course": self.course(q["course"]), "name": q["name"],
                         "short": short_name(q["name"]), "due": moment(close, self.now),
                         "submission": "submitted" if "finished" in states else None,
+                        "opens": (moment(q["timeopen"], self.now)
+                                  if (q.get("timeopen") or 0) > self.now else None),
                         "open_attempt": any(st in ("inprogress", "overdue") for st in states),
                         "attempts_used": None if tries is None else len(tries),
                         "attempts_max": q.get("attempts") or None,
@@ -557,7 +563,8 @@ def quiz_rows(t):
     for q in t.get("quizzes", []):
         if q["submission"] == "submitted":
             continue
-        tries = ("начат, не отправлен; " if q["open_attempt"] else "") + attempts(q)
+        tries = ((f"откроется {q['opens']['text']}; " if q.get("opens") else "")
+                 + ("начат, не отправлен; " if q["open_attempt"] else "") + attempts(q))
         cells = [q["due"]["text"], q["due"]["left"], q["short"], label(q), tries,
                  f"{q['timelimit_min']} мин" if q["timelimit_min"] else "—"]
         rows.append(bold(cells) if q["due"]["left_sec"] < URGENT or q["open_attempt"] else cells)

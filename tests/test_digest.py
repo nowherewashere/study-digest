@@ -127,7 +127,7 @@ class CollectorTest(DigestCase):
         by = {a["short"]: a for a in d["deadlines"]}
         self.assertEqual((by["Доклад к лекции 1"]["source"], by["Доклад к лекции 1"]["submission"]),
                          ("course_contents", "hidden"))
-        self.assertEqual(by["Тема доклада к лекции 1"]["choice"], {"chosen": None, "options": 3})
+        self.assertEqual(by["Тема доклада к лекции 1"]["choice"], {"chosen": None, "options": 2})
         self.assertEqual(by["Тема доклада к лекции 1"]["submission"], "new")
         self.assertIsNone(by["Опрос о курсе"]["submission"])
         self.assertEqual(d["submitted"][0]["grade"], "9.50000")
@@ -179,6 +179,22 @@ class CollectorTest(DigestCase):
         hw = next(a for a in d["overdue"] if a["short"] == "ДЗ 1 — Кодирование")
         self.assertEqual((hw["submission"], hw["grade"]), ("new", None))
         self.assertIn("ДЗ 1 — Кодирование", names(d["not_started"]))
+
+    def test_quiz_opens_later(self):
+        quizzes = fixture("quizzes")
+        for q in quizzes["quizzes"]:
+            if q["id"] == 8:
+                q["timeopen"] = NOW + DAY
+        queue(self.net)
+        self.net.drop("mod_quiz_get_quizzes_by_courses")
+        self.net.reply("POST", "mod_quiz_get_quizzes_by_courses", quizzes)
+        self.net.drop("mod_quiz_get_user_attempts", "quizid=8")
+        self.net.reply("POST", ("mod_quiz_get_user_attempts", "quizid=8"), {"attempts": []})
+        d = digest.Collector(self.cfg, Moodle(self.cfg), 21, STATE).run()
+        q = next(x for x in d["quizzes"] if x["quiz_id"] == 8)
+        self.assertEqual(q["opens"]["ts"], NOW + DAY)
+        self.assertIn("| Итоговый тест | Вычислительные методы | откроется 17.09 09:00; 0 из ∞ |",
+                      digest.render_digest(d))
 
     def test_quizzes_updates_notifications(self):
         _, d = self.collect()
