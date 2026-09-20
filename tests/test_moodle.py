@@ -3,8 +3,8 @@ import unittest
 
 from study import cli, fmt, net
 from study.config import StudyError
-from study.moodle import (PAGE, Moodle, accepts, accepts_line, check_submission, grade_of,
-                          submission_state)
+from study.moodle import (PAGE, Moodle, accepts, accepts_line, check_state, check_submission,
+                          grade_of, submission_state)
 from tests.fakes import FakeNet, config, fixture, tmpdir
 
 SERVER = "https://tuis.example/webservice/rest/server.php"
@@ -383,6 +383,12 @@ class SubmissionStateTest(unittest.TestCase):
         self.assertEqual((s["due"], s["cutoff"], s["closed"]), (now + 500, now + 500, False))
         s = submission_state({**a, "allowsubmissionsfromdate": now + 9}, ext, now)
         self.assertEqual(s["opens"], now + 9)
+        # сдано (оценено очно) и приём откроется позже: причина отказа — оценка, не «откроется»
+        s = submission_state({**a, "allowsubmissionsfromdate": now + 9}, graded, now)
+        s["canedit"] = False
+        self.assertEqual(check_state(s, str)[0][:21], "уже оценено (9.50000)")
+        s["grade"] = None   # graded, но балла нет (marking workflow) — без «(None)»
+        self.assertEqual(check_state(s, str)[0][:13], "уже оценено —")
         s = submission_state({}, {}, now)   # статус не получен: ничего не утверждаем
         self.assertEqual((s["status"], s["canedit"], s["closed"], s["due"]),
                          ("new", None, False, None))

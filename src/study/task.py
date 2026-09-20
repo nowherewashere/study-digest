@@ -9,7 +9,7 @@ import time
 from . import local
 from .config import ROOT, StudyError
 from .fmt import moment, parse_name, plain, short_name
-from .moodle import SUBMISSION, accepts, accepts_line, submission_state
+from .moodle import PENDING, SUBMISSION, accepts, accepts_line, submission_state
 
 
 def find(assigns, what, label):
@@ -110,7 +110,7 @@ def render(d):
         state += f" · балл {d['grade']}" + (f" ({d['grade_text']})" if d["grade_text"] else "")
     if s["modified"] and s["status"] != "new":   # у несданного Moodle подставляет срок
         state += f" · изменён {s['modified']['full']}"
-    if d["opens"]:
+    if d["opens"] and s["status"] in PENDING:
         state += f" · откроется {d['opens']['full']}"
     elif d["closed"]:
         state += " · заблокировано" if d["locked"] else " · приём закрыт"

@@ -368,6 +368,31 @@ class CollectorTest(DigestCase):
         self.assertIn("ДЗ 1 — Кодирование", names(d["not_started"]))
         self.assertEqual(c.snapshot(d)["assignments"]["13"], DUE[-5])
         self.assertNotIn("ДЗ 1 — Кодирование", names(d["moved"]))   # продление — не сдвиг срока
+        # продление за горизонт окна: не «просрочено» с будущей датой, а вне сводки
+        _, d, _ = run(13, {"canedit": True, "extensionduedate": NOW + 40 * DAY})
+        self.assertNotIn("ДЗ 1 — Кодирование", names(d["overdue"]) + names(d["deadlines"]))
+        # оценено очно до открытия приёма: «сдано», а не «откроется»
+        st = fixture("submission_status_submitted")
+        st["lastattempt"]["submission"]["status"] = "new"
+        queue(self.net)
+        self.net.drop("mod_assign_get_submission_status", "assignid=15")
+        self.net.reply("POST", ("mod_assign_get_submission_status", "assignid=15"), st)
+        d = digest.Collector(self.cfg, Moodle(self.cfg), 21, STATE).run()
+        lab3 = next(a for a in d["deadlines"] if a["assign_id"] == 15)
+        self.assertEqual((lab3["submission"], digest.status_of(lab3)), ("submitted", "сдано"))
+
+    def test_status_without_due(self):
+        # оригинал без срока (duedate 0) с продлением: status() не падает и ставит срок
+        self.net.reply("POST", "core_webservice_get_site_info", fixture("site_info"))
+        self.net.reply("POST", "core_enrol_get_users_courses", fixture("users_courses"))
+        c = digest.Collector(self.cfg, Moodle(self.cfg), 21, {})
+        c.raw[14] = {"id": 14, "duedate": 0}
+        st = fixture("submission_status_new")
+        st["lastattempt"]["extensionduedate"] = NOW + DAY
+        c.moodle = type("M", (), {"submission_status": staticmethod(lambda _aid: st)})()
+        item = {"assign_id": 14, "due": None, "submission": None, "feedback": None}
+        c.status(item)
+        self.assertEqual((item["due"]["ts"], item["submission"], c.errors), (NOW + DAY, "new", []))
 
     def test_grades_and_outside(self):
         _, d = self.collect()

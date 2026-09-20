@@ -302,11 +302,11 @@ def check_state(s, when):
     время. Смотрит canedit, а не closed: отказать надо и при «сдано, правка закрыта»."""
     if s["status"] == "offline":
         return ["у задания нет ответа в ТУИС (очная сдача) — отправлять нечего"]
-    if s["opens"]:
+    if s["opens"] and s["status"] in PENDING:   # сданному важнее, почему правка закрыта
         return [f"приём откроется {when(s['opens'])}"]
     if s["canedit"] is False:
         why = ("заблокировано преподавателем" if s["locked"]
-               else f"уже оценено ({s['grade']})" if s["graded"]
+               else "уже оценено" + (f" ({s['grade']})" if s["grade"] else "") if s["graded"]
                else "ответ уже отправлен на проверку, правка закрыта"
                if s["status"] == "submitted"
                else f"приём закрыт {when(s['cutoff'])}" if s["cutoff"]

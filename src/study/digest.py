@@ -142,9 +142,10 @@ class Collector:
             if not item["retake"]:
                 self.status(item)
         self.retakes([a for a in live if a["retake"]])
-        # продление срока преподавателем могло вывести работу из просроченного — пересобрать
+        # продление срока преподавателем могло вывести работу из просроченного — пересобрать;
+        # продлённое за горизонт окна уходит из обоих списков, как любой далёкий срок
         self.soon = [a for a in live if self.within(a["due"]["ts"])]
-        self.overdue = [a for a in live if not self.within(a["due"]["ts"])]
+        self.overdue = [a for a in live if a["due"]["ts"] < self.now]
         return new, moved
 
     def status(self, item):
@@ -159,7 +160,7 @@ class Collector:
                         graded=s["graded"], closed=s["closed"], canedit=s["canedit"],
                         locked=s["locked"],
                         opens=moment(s["opens"], self.now) if s["opens"] else None)
-            if s["due"] and s["due"] != item["due"]["ts"]:
+            if s["due"] and s["due"] != (item["due"] or {}).get("ts"):
                 item["due"] = moment(s["due"], self.now)   # индивидуальное продление срока
             item["feedback_new"] = bool(item["feedback"]) and self.fb is not None \
                 and self.fb.get(str(item["assign_id"])) != item["feedback"]
@@ -472,7 +473,7 @@ def status_of(a):
     if a["submission"] is None:
         # статус не получен (ошибка в errors) или элемент без ответа: опрос, взаимная проверка
         return KINDS.get(a.get("modname"), "?") if a["kind"] == "activity" else "?"
-    if a.get("opens"):
+    if a.get("opens") and a["submission"] in PENDING:   # сданному «откроется» ни к чему
         return "откроется " + a["opens"]["text"]
     if a.get("closed"):
         return "заблокировано" if a.get("locked") else "приём закрыт"
