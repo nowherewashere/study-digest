@@ -59,6 +59,7 @@ class Collector:
         self.since = state.get("last_run")            # None — первый запуск
         self.known = state.get("assignments", {})     # id задания → срок с прошлого запуска
         self.graded = state.get("grades")             # {курс: {работа: балл}}; None — нет снимка
+        self.files = state.get("files")               # {курс: [cmid/файл]}; None — нет состава
         self.errors = list(errors)                    # с чем пришёл снимок
         self.courses = {c.id: c for c in cfg.track(moodle.courses())}
         self.ignore = cfg.ignore()   # решение пользователя: этих курсов в сводке нет вовсе
@@ -74,12 +75,12 @@ class Collector:
         return c.as_dict() if c else {"id": cid, "code": None, "title": ""}
 
     def contents(self, cid):
-        """Состав курса; неудача запоминается, чтобы не ходить и не жаловаться дважды."""
+        """Состав курса; неудача запоминается (None), чтобы не ходить и не жаловаться дважды."""
         if cid not in self._contents:
-            self._contents[cid] = []
+            self._contents[cid] = None
             with self.soft(f"состав курса {cid}"):
                 self._contents[cid] = self.moodle.contents(cid)
-        return self._contents[cid]
+        return self._contents[cid] or []
 
     def within(self, ts):
         return self.now <= ts <= self.horizon
@@ -186,7 +187,9 @@ class Collector:
         return by_due(out)
 
     def updates(self):
-        """Что изменилось в курсах с прошлого запуска — с именами новых файлов."""
+        """Что изменилось в курсах: по core_course_get_updates_since и по составу против снимка.
+        Ручка не видит файл, положенный в курс со старой датой (скопирован из прошлогоднего
+        курса) или просто открытый студентам, — такой ловится тем, что в снимке его не было."""
         out = []
         if not self.since:
             return out
@@ -195,23 +198,32 @@ class Collector:
             with self.soft(f"обновления курса {cid}"):
                 changed = [u for u in self.moodle.updates_since(cid, self.since)
                            if u.get("updates")]
-            if not changed:
-                continue
-            names = {m["id"]: (m["name"], m["modname"], sec["name"], m.get("contents") or [])
-                     for sec in self.contents(cid) for m in sec.get("modules", [])}
+            modules = {m["id"]: (m, sec["name"]) for sec in self.contents(cid)
+                       for m in sec.get("modules", [])}
+            known = self.files.get(str(cid)) if self.files is not None else None
+            known = set(known) if known is not None else None
+            rows = {}
+
+            def row(mid, m, section, what):
+                return rows.setdefault(mid, {
+                    "course": self.course(cid), "section": section, "item": m["name"],
+                    "modname": m.get("modname", ""), "files": [], "what": what})
+
             for u in changed:
                 kinds = {x["name"] for x in u["updates"]} & USEFUL
                 if not kinds:
                     continue
-                name, modname, section, items = names.get(
-                    u["id"], (f"(модуль {u['id']})", "", "", []))
-                # имена файлов — чтобы сводка говорила «появился 002-dns.pdf», а не «новые файлы»
-                new_files = [i["filename"] for i in items
-                             if i.get("type") == "file" and i.get("filesize")
-                             and (i.get("timemodified") or 0) > self.since]
-                out.append({"course": self.course(cid), "section": section,
-                            "item": name, "modname": modname, "files": new_files,
-                            "what": "новые файлы" if kinds & FILES else "изменены настройки"})
+                m, section = modules.get(u["id"], ({"name": f"(модуль {u['id']})"}, ""))
+                row(u["id"], m, section,
+                    "новые файлы" if kinds & FILES else "изменены настройки")
+            # имена файлов — чтобы сводка говорила «появился 002-dns.pdf», а не «новые файлы»
+            for mid, (m, section) in modules.items():
+                new_files = [files.safe(c["filename"]) for c in m.get("contents") or []
+                             if files.is_file(c) and c.get("filesize")
+                             and files.fresh(m, c, self.since, known)]
+                if new_files:
+                    row(mid, m, section, "новые файлы")["files"] = new_files
+            out.extend(rows.values())
         return out
 
     def notifications(self):
@@ -309,6 +321,11 @@ class Collector:
             "courses": {str(c.id): c.title for c in self.courses.values()},
             "grades": {str(g["course"]["id"]): {i["name"]: i["raw"] for i in g["items"]}
                        for g in data["grades"]},
+            # состав курса не прочитался — оставить прошлый, иначе завтра всё окажется новым
+            "files": {str(cid): files.keys(self._contents[cid])
+                      if self._contents.get(cid) is not None
+                      else (self.files or {}).get(str(cid), [])
+                      for cid in self.courses},
         }
 
 
@@ -503,15 +520,17 @@ def render_digest(d):
 
 def pull_updates(cfg, moodle, tuis, errors):
     """Забрать файлы, о которых сообщила сводка; в каждой строке `updates` пометить скачанное."""
-    # `since` берётся из сводки: снимок состояния к этому моменту уже сдвинут на «сейчас»
-    since = (tuis["since"] or {}).get("ts", 0)
+    # что новое, уже решила сводка (снимок к этому моменту сдвинут на «сейчас») — берём по именам
     for c in tuis["courses"]:
         todo = [u for u in tuis["updates"] if u["files"] and u["course"]["id"] == c["id"]]
         if not todo or not c["code"]:
             continue
         course = Course(c["id"], c["code"], c["title"])
+        wanted = {n for u in todo for n in u["files"]}
         with soft(errors, f"файлы, курс {c['code']}"):
-            got = files.pull(moodle, files.listing(cfg, moodle, course, since=since))
+            d = files.listing(cfg, moodle, course, everything=True)
+            d["files"] = [f for f in d["files"] if f["name"] in wanted]
+            got = files.pull(moodle, d)
             names = [g["name"] for g in got["pulled"]]
             for u in todo:
                 u["pulled"] = [n for n in u["files"] if n in names]

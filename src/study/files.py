@@ -44,17 +44,42 @@ def safe(name):
     return name[:200]
 
 
+def key(module, content):
+    """Файл в снимке — модуль и имя. Не дата: файл, скопированный из прошлогоднего курса,
+    приходит с датой того года и по `timemodified` новым не выглядит."""
+    return f"{module.get('id')}/{content.get('filename')}"
+
+
+def is_file(content):
+    return content.get("type") == "file" and bool(content.get("fileurl"))
+
+
+def keys(contents):
+    """Все файлы состава курса — что запомнить в снимке."""
+    return sorted(key(m, c) for sec in contents for m in sec.get("modules", [])
+                  for c in m.get("contents") or [] if is_file(c))
+
+
+def fresh(module, content, since, known):
+    """Новый: не было в снимке (`known`; None — снимок без состава) или изменён после `since`."""
+    return ((known is not None and key(module, content) not in known)
+            or (content.get("timemodified") or 0) > (since or 0))
+
+
 def listing(cfg, moodle, course, since=None, everything=False):
-    """Файлы курса; `new` — появился или изменился после `since`."""
+    """Файлы курса; `new` — не было при прошлой сводке или изменился после `since`."""
+    state = load_state(cfg)
     if since is None:
-        since = load_state(cfg).get("last_run")
+        since = state.get("last_run")
     since = since or 0
+    known = state.get("files", {}).get(str(course.id))
+    known = set(known) if known is not None else None
     into = stash(course)
     out = []
     for sec in moodle.contents(course.id):
         for m in sec.get("modules", []):
             for c in m.get("contents") or []:
-                if c.get("type") != "file" or not c.get("fileurl"):
+                if not is_file(c):
                     continue
                 name = safe(c.get("filename"))
                 size = c.get("filesize") or 0
@@ -73,12 +98,12 @@ def listing(cfg, moodle, course, since=None, everything=False):
                         "url": c["fileurl"], "section": sec.get("name"),
                         "module": m.get("name"), "modname": m.get("modname"),
                         "path": str(have or into / name), "have": bool(have),
-                        "new": (c.get("timemodified") or 0) > since, "skip": skip}
+                        "new": fresh(m, c, since, known), "skip": skip}
                 if everything or item["new"]:
                     out.append(item)
     out.sort(key=lambda x: -(x["modified"]["ts"] if x["modified"] else 0))
     return {"course": course.as_dict(), "stash": str(into), "since": moment(since),
-            "all": everything, "files": out}
+            "tracked": known is not None, "all": everything, "files": out}
 
 
 class Progress:
@@ -148,8 +173,8 @@ def render(d, pulled=False):
     """Список файлов с отметкой: скачан / уже есть / пропущен и почему / можно забрать."""
     out = [f"Курс: {d['course']['title'] or d['course']['id']} · stash: {d['stash']}",
            "Все файлы курса" if d["all"] else
-           f"Новым считается всё, что изменилось после "
-           f"{d['since']['full'] if d['since'] else 'начала времён'}"]
+           "Новое — " + ("чего не было при прошлой сводке или " if d.get("tracked") else "")
+           + f"что изменилось после {d['since']['full'] if d['since'] else 'начала времён'}"]
     if not d["files"]:
         out.append("\nНовых файлов нет.")
         return "\n".join(out)

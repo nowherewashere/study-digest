@@ -1,3 +1,4 @@
+import json
 import unittest
 
 from study import answer, files, local
@@ -44,6 +45,17 @@ class FilesTest(unittest.TestCase):
         new = files.listing(self.cfg, self.m, self.course, since=SINCE)
         self.assertEqual([f["name"] for f in new["files"]], ["002-dns.pdf", "video.mp4", "big.zip"])
         self.assertIn("Забрать: study files nettech --pull", files.render(new))
+
+    def test_listing_by_snapshot(self):
+        # старый файл, которого не было при прошлой сводке, — новый, дата не в счёт
+        self.cfg.state_file().write_text(json.dumps(
+            {"last_run": SINCE, "files": {"1": ["121/002-dns.pdf", "122/video.mp4"]}}),
+            encoding="utf-8")
+        d = files.listing(self.cfg, self.m, self.course)
+        self.assertTrue(d["tracked"])
+        self.assertEqual([f["name"] for f in d["files"]],
+                         ["002-dns.pdf", "video.mp4", "big.zip", "lecture-01.pptx", "index.html"])
+        self.assertIn("чего не было при прошлой сводке", files.render(d))
 
     def test_listing_since_from_state(self):
         d = files.listing(self.cfg, self.m, self.course)   # снимка нет — новым считается всё

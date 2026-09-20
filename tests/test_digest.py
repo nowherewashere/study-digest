@@ -5,7 +5,7 @@ import unittest
 
 from study import config as studyconfig
 from study import digest, files, local, update
-from study.config import StudyError
+from study.config import Course, StudyError
 from study.moodle import Moodle
 from tests.fakes import DAY, NOW, FakeNet, config, fixture, patch, repo, tmpdir
 
@@ -17,6 +17,8 @@ STATE = {"last_run": NOW - DAY,
                          "17": 1785704340, "21": DUE[10]},
          "courses": {"1": "Сетевые технологии", "2": "Вычислительные методы"},
          "grades": {"1": {"Сдать отчет по лабораторной работе № 1. Vagrant и Packer": 8.0}}}
+KEYS = {"1": ["121/002-dns.pdf", "122/big.zip", "122/lecture-01.pptx", "122/video.mp4",
+              "123/index.html"], "2": ["221/lecture-01.pdf"]}   # состав курсов в фикстурах
 
 
 def queue(net, since=True):
@@ -144,6 +146,65 @@ class CollectorTest(DigestCase):
                           ("Лекции", "новые файлы", ["lecture-01.pdf"])])
         self.assertEqual([n["id"] for n in d["notifications"]], [902])   # без AUTO_EVENTS и старых
 
+    def test_updates_by_snapshot(self):
+        # lecture-01.pptx старый (3 дня), но в снимке его не было — новый; ручку updates_since
+        # молчащей делаем нарочно: файл, открытый студентам, она тоже не покажет
+        state = {**STATE, "files": {"1": [k for k in KEYS["1"] if "pptx" not in k], "2": []}}
+        queue(self.net)
+        self.net.drop("core_course_get_updates_since", "courseid=1")
+        self.net.reply("POST", ("core_course_get_updates_since", "courseid=1"),
+                       {"instances": [], "warnings": []})
+        d = digest.Collector(self.cfg, Moodle(self.cfg), 21, state).run()
+        self.assertEqual([(u["item"], u["what"], u["files"]) for u in d["updates"]],
+                         [("Методичка 2", "новые файлы", ["002-dns.pdf"]),
+                          ("Материалы", "новые файлы", ["lecture-01.pptx", "video.mp4", "big.zip"]),
+                          ("Лекции", "новые файлы", ["lecture-01.pdf"])])
+
+    def test_three_days(self):
+        """Полный цикл через снимок на диске: старый снимок без состава → состав записан →
+        назавтра в курсе появился файл 2020 года → сводка и --pull его видят → потом тишина."""
+        def day(contents, since):
+            queue(self.net)
+            self.net.drop("core_course_get_contents", "courseid=1")
+            self.net.reply("POST", ("core_course_get_contents", "courseid=1"), contents)
+            self.net.drop("core_course_get_updates_since")
+            for cid in (1, 2):
+                self.net.reply("POST", ("core_course_get_updates_since", f"courseid={cid}",
+                                        f"since={since}"), {"instances": [], "warnings": []})
+            return digest.collect(self.cfg, Moodle(self.cfg))
+
+        patch(self, files, "ROOT", self.tmp)
+        old = {"type": "file", "filename": "task-2.pdf", "filesize": 1000, "timemodified": 1.6e9,
+               "fileurl": "https://tuis.example/webservice/pluginfile.php/10/mod_resource/"
+                          "content/1/task-2.pdf?forcedownload=1"}
+        v1 = fixture("course_contents")
+        v2 = fixture("course_contents")
+        v2[1]["modules"].append({"id": 124, "name": "Задание 2", "modname": "resource",
+                                 "contents": [old]})
+        self.cfg.state_file().write_text(json.dumps(STATE), encoding="utf-8")   # без files
+        d = day(v1, NOW - DAY)   # снимок без состава: только по дате — свежие за сутки
+        self.assertEqual([u["item"] for u in d["updates"]], ["Методичка 2", "Материалы", "Лекции"])
+        self.assertEqual(json.loads(self.cfg.state_file().read_text(encoding="utf-8"))["files"],
+                         KEYS)
+
+        d = day(v2, NOW)
+        self.assertEqual([(u["item"], u["files"]) for u in d["updates"]],
+                         [("Задание 2", ["task-2.pdf"])])
+        self.net.reply("POST", ("core_course_get_contents", "courseid=1"), v2)
+        self.net.reply("GET", "task-2.pdf?forcedownload=1&token=test-token", b"%PDF-old")
+        errors = []
+        digest.pull_updates(self.cfg, Moodle(self.cfg), d, errors)
+        self.assertEqual((errors, d["updates"][0]["pulled"]), ([], ["task-2.pdf"]))
+        self.assertEqual((self.tmp / "nettech/stash/task-2.pdf").read_bytes(), b"%PDF-old")
+        self.assertIn("| nettech | Лабораторные работы | Задание 2: новые файлы | task-2.pdf |",
+                      digest.render_digest(d))
+
+        d = day(v2, NOW)
+        self.assertEqual(d["updates"], [])
+        self.net.reply("POST", ("core_course_get_contents", "courseid=1"), v2)
+        d = files.listing(self.cfg, Moodle(self.cfg), Course(1, "nettech", "Сетевые технологии"))
+        self.assertEqual((d["tracked"], d["files"]), (True, []))
+
     def test_grades_and_outside(self):
         _, d = self.collect()
         g = {x["course"]["id"]: x for x in d["grades"]}
@@ -168,6 +229,17 @@ class CollectorTest(DigestCase):
                                              "Packer": 8.0,
                                              "Сдать отчет по лабораторной работе № 2. DNS": 9.5},
                                        "2": {"Загрузка 1 лабораторной работы": 10.0}})
+        self.assertEqual(s["files"], KEYS)
+
+    def test_snapshot_keeps_files_of_unread_course(self):
+        queue(self.net)
+        self.net.drop("core_course_get_contents", "courseid=2")
+        self.net.reply("POST", ("core_course_get_contents", "courseid=2"),
+                       {"exception": "x", "errorcode": "invalidrecord", "message": "no"})
+        c = digest.Collector(self.cfg, Moodle(self.cfg), 21, {**STATE, "files": KEYS})
+        s = c.snapshot(c.run())
+        self.assertEqual(s["files"], KEYS)   # состав курса 2 не прочитался — прошлый список
+        self.assertIn("состав курса 2", [e["where"] for e in c.errors])
 
     def test_first_run(self):
         _, d = self.collect(state={})
