@@ -57,7 +57,8 @@ def cmd_courses(cfg, args):
         return rows, courses.render(rows)
     out = courses.setup(cfg, rows)
     return out, "config.env обновлён: COURSE_IGNORE ({}), CODE ({})".format(
-        len(out["ignore"]), len(out["code"]))
+        len(out["ignore"]), len(out["code"])) + (
+        "; заготовки NOTES.md: " + ", ".join(out["notes"]) if out["notes"] else "")
 
 
 def cmd_functions(cfg, args):

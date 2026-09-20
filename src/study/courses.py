@@ -5,6 +5,38 @@ import time
 from .config import ROOT
 from .fmt import table
 
+# Заготовка заметок по предмету: шапку и таблицы заполняет человек или агент по программе
+# и БРС из stash/. Файл ни при каких условиях не перезаписывается.
+NOTES = """# {title} — заметки
+
+Курс в ТУИС: `{cid}` «{title}». Преподаватель, формат сдачи, правила — дописать по программе
+и БРС из `stash/` (`study files {code} --pull`).
+
+## Задания и сроки
+
+| Задание | cmid / assignid | Срок |
+|---|---|---|
+
+## Ключевые находки
+
+-
+
+## Лабы
+
+| № | Тема | Статус |
+|---|------|--------|
+"""
+
+
+def notes_stub(code, cid, title=None):
+    """`<код>/NOTES.md`, если его ещё нет: путь созданного файла, иначе None."""
+    p = ROOT / code / "NOTES.md"
+    if p.exists():
+        return None
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(NOTES.format(title=title or code, cid=cid, code=code), encoding="utf-8")
+    return p
+
 
 def seen(ts):
     return time.strftime("%Y-%m-%d", time.localtime(ts)) if ts else "никогда"
@@ -82,7 +114,11 @@ def setup(cfg, rows_):
         codes[r["id"]] = input(f"  {r['title'][:50]} [{default}]: ").strip() or default
 
     cfg.write_courses(ignore_ids, codes)
-    for code in codes.values():
+    titles = {r["id"]: r["title"] for r in rows_}
+    notes = []
+    for cid, code in codes.items():
         (ROOT / code / "stash").mkdir(parents=True, exist_ok=True)
         (ROOT / code / "tuis").mkdir(parents=True, exist_ok=True)
-    return {"ignore": sorted(ignore_ids), "code": codes}
+        if notes_stub(code, cid, titles.get(cid)):
+            notes.append(code)
+    return {"ignore": sorted(ignore_ids), "code": codes, "notes": notes}

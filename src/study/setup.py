@@ -28,6 +28,7 @@ except ImportError:   # не Windows
 from . import agent, courses, files
 from .config import HERE, ROOT, StudyError
 from .moodle import Moodle
+from .snapshot import load_state
 
 STEPS = ["Токены", "Каталоги", "Проверка", "Оператор", "Курсы"]
 RULE = "-" * 72
@@ -258,10 +259,12 @@ def dirs(s, cfg):
     state.mkdir(parents=True, exist_ok=True)
     s.ok(f"снимок состояния сводки: {state}")
     codes = cfg.codes()
-    for code in codes.values():
+    titles = load_state(cfg).get("courses") or {}   # сети на этом шаге нет — названия из снимка
+    for cid, code in codes.items():
         for sub in ("stash", "tuis"):
             (ROOT / code / sub).mkdir(parents=True, exist_ok=True)
-        s.ok(f"{ROOT / code}{os.sep}{{stash,tuis}}")
+        made = courses.notes_stub(code, cid, titles.get(str(cid)))
+        s.ok(f"{ROOT / code}{os.sep}{{stash,tuis" + (",NOTES.md}" if made else "}"))
     if not codes:
         s.note("папки курсов появятся на шаге «Курсы»")
 

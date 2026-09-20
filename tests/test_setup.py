@@ -159,6 +159,9 @@ class SetupTest(SetupCase):
     def test_operators_dirs_and_pull(self):
         (self.root / "CLAUDE.md").write_text("# Моё\n", encoding="utf-8")
         cfg = self.config("TUIS_TOKEN=t\nCODE 1 nettech\n")
+        # на шаге «Каталоги» сети нет: название курса для заготовки NOTES.md — из снимка
+        (self.here / ".state.json").write_text(
+            json.dumps({"last_run": 1, "courses": {"1": "Сетевые технологии"}}), encoding="utf-8")
         # операторы; курсы: старые в игнор, готово, два имени папок; скачать
         self.answers = ["claude codex", "s", "", "", "", "y"]
         self.moodle_ok()
@@ -172,8 +175,12 @@ class SetupTest(SetupCase):
         self.net.reply("GET", "lecture-01.pdf", b"%PDF")
         with mock.patch.object(setup, "tokens", lambda *_: None):   # токены не спрашиваем
             log, _, out = self.run_setup(cfg)
-        self.assertIn(["ok", "Каталоги", f"{self.root / 'nettech'}{os.sep}{{stash,tuis}}"], log)
+        self.assertIn(["ok", "Каталоги", f"{self.root / 'nettech'}{os.sep}{{stash,tuis,NOTES.md}}"],
+                      log)
         self.assertIn(["ok", "Каталоги", f"снимок состояния сводки: {self.here}"], log)
+        notes = (self.root / "nettech" / "NOTES.md").read_text(encoding="utf-8")
+        self.assertTrue(notes.startswith("# Сетевые технологии — заметки\n"))
+        self.assertIn("Курс в ТУИС: `1`", notes)
         self.assertIn(["ok", "Оператор", "поставлено: claude codex"], log)
         claude = (self.root / "CLAUDE.md").read_text(encoding="utf-8")
         self.assertTrue(claude.startswith("# Моё\n\n" + agent.BEGIN))
@@ -181,6 +188,10 @@ class SetupTest(SetupCase):
         self.assertIn("  код      файл", out)   # таблица операторов с отступом
         self.assertEqual(Config(cfg.path).ignore(), {4})
         self.assertIn(["ok", "Курсы", "записаны в config.env: 2 папок"], log)
+        # курс 2 получил папку «2» на шаге «Курсы» — заготовка с названием из ТУИС
+        self.assertTrue((self.root / "2" / "NOTES.md").read_text(encoding="utf-8")
+                        .startswith("# Вычислительные методы — заметки\n"))
+        self.assertTrue(notes == (self.root / "nettech" / "NOTES.md").read_text(encoding="utf-8"))
         self.assertIn("  nettech: скачано 2\n  2: скачано 1\n", out)
         self.assertIn(["ok", "Курсы", "материалы курсов в stash/"], log)
         self.assertEqual((self.root / "nettech" / "stash" / "002-dns.pdf").read_bytes(), b"%PDF-2")
@@ -323,3 +334,25 @@ class LinkTest(unittest.TestCase):
         self.assertTrue(setup.in_path(self.bin))
         os.environ["PATH"] = "/usr/bin"
         self.assertFalse(setup.in_path(self.bin))
+
+
+class NotesStubTest(unittest.TestCase):
+    def test_stub_once(self):
+        root = tmpdir(self)
+        patch(self, courses, "ROOT", root)
+        p = courses.notes_stub("nettech", 1, "Сетевые технологии")
+        self.assertEqual(p, root / "nettech" / "NOTES.md")
+        text = p.read_text(encoding="utf-8")
+        self.assertIn("# Сетевые технологии — заметки\n\nКурс в ТУИС: `1` «Сетевые технологии»",
+                      text)
+        self.assertIn("`study files nettech --pull`", text)
+        for head in ("## Задания и сроки", "## Ключевые находки", "## Лабы"):
+            self.assertIn(head, text)
+        self.assertIsNone(courses.notes_stub("nettech", 1, "Другое"))
+        self.assertEqual(p.read_text(encoding="utf-8"), text)   # повтор не трогает
+        (root / "bpm").mkdir()
+        (root / "bpm" / "NOTES.md").write_text("# Моё\n", encoding="utf-8")
+        self.assertIsNone(courses.notes_stub("bpm", 5))
+        self.assertEqual((root / "bpm" / "NOTES.md").read_text(encoding="utf-8"), "# Моё\n")
+        self.assertTrue(courses.notes_stub("x", 9).read_text(encoding="utf-8")
+                        .startswith("# x — заметки"))   # без названия — код папки
