@@ -10,7 +10,7 @@ import time
 import unittest
 from unittest import mock
 
-from study import agent, courses, files, setup
+from study import agent, courses, files, local, setup
 from study.config import Config
 from tests.fakes import NOW, FakeNet, fixture, patch, tmpdir
 
@@ -27,7 +27,7 @@ class SetupCase(unittest.TestCase):
         (self.here / "study").write_text("#!/usr/bin/env python3\n", encoding="utf-8")
         (self.here / "docs" / "AGENTS.md").write_text("# Инструкция\n", encoding="utf-8")
         (self.here / "config.env.example").write_text("# пример\nTUIS_TOKEN=\n", encoding="utf-8")
-        for mod in (setup, agent, courses, files):
+        for mod in (setup, agent, courses, files, local):
             patch(self, mod, "ROOT", self.root)
         patch(self, setup, "HERE", self.here)
         patch(self, agent, "SOURCE", self.here / "docs" / "AGENTS.md")
@@ -69,6 +69,7 @@ class SetupTest(SetupCase):
         cfg = self.config()
         # браузер, оператор, курсы (папка и сдача ×3; у второго курса сдача — r), pull
         self.answers = ["n", "", "", "nettech", "", "", "r", "", "", "n"]
+        (self.root / "nettech" / "course" / ".git").mkdir(parents=True)   # репозиторий → release?
         self.secrets = ["a" * 32, "", ""]
         self.moodle_ok()
         log, text, out = self.run_setup(cfg)
@@ -165,6 +166,7 @@ class SetupTest(SetupCase):
 
     def test_operators_dirs_and_pull(self):
         (self.root / "CLAUDE.md").write_text("# Моё\n", encoding="utf-8")
+        (self.root / "nettech" / "course" / ".git").mkdir(parents=True)   # репозиторий → release
         cfg = self.config("TUIS_TOKEN=t\nCODE 1 nettech\n")
         # на шаге «Каталоги» сети нет: название курса для заготовки NOTES.md — из снимка
         (self.here / ".state.json").write_text(
