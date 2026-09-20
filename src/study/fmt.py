@@ -35,7 +35,10 @@ def moment(ts, now=None):
     delta = ts - now
     return {
         "ts": ts,
-        "iso": datetime.datetime.fromtimestamp(ts).astimezone().isoformat(timespec="seconds"),
+        # Без tz=utc Windows падает с OSError на первых часах эпохи (`--since all` даёт ts=1):
+        # пересчёт naive-времени в местное уходит за 1970-01-01 UTC.
+        "iso": datetime.datetime.fromtimestamp(ts, datetime.timezone.utc)
+                       .astimezone().isoformat(timespec="seconds"),
         "text": time.strftime("%d.%m %H:%M", time.localtime(ts)),
         "full": time.strftime("%d.%m.%Y %H:%M", time.localtime(ts)),
         "left": left(delta),
