@@ -164,6 +164,15 @@ class CollectorTest(DigestCase):
         self.assertEqual((graded["submission"], graded["grade"]), ("submitted", "15.00000"))
         self.assertNotIn("ДЗ 1 — Кодирование", names(d["overdue"]))
         self.assertNotIn("ДЗ 1 — Кодирование", names(d["not_started"]))
+        # отзыв сохранён без оценки: Moodle шлёт grade -1 (ASSIGN_GRADE_NOT_SET) — не сдано
+        queue(self.net)
+        self.net.drop("mod_assign_get_submission_status", "assignid=13")
+        status["feedback"] = {"grade": {"grade": "-1.00000"}}
+        self.net.reply("POST", ("mod_assign_get_submission_status", "assignid=13"), status)
+        d = digest.Collector(self.cfg, Moodle(self.cfg), 21, STATE).run()
+        hw = next(a for a in d["overdue"] if a["short"] == "ДЗ 1 — Кодирование")
+        self.assertEqual((hw["submission"], hw["grade"]), ("new", None))
+        self.assertIn("ДЗ 1 — Кодирование", names(d["not_started"]))
 
     def test_quizzes_updates_notifications(self):
         _, d = self.collect()

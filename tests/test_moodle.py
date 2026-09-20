@@ -3,7 +3,7 @@ import unittest
 
 from study import cli, net
 from study.config import StudyError
-from study.moodle import PAGE, Moodle, accepts, accepts_line, check_submission
+from study.moodle import PAGE, Moodle, accepts, accepts_line, check_submission, grade_of
 from tests.fakes import FakeNet, config, fixture, tmpdir
 
 SERVER = "https://tuis.example/webservice/rest/server.php"
@@ -215,6 +215,15 @@ class AcceptsTest(unittest.TestCase):
         # группа типов Moodle (document) не разворачивается — расширение не проверяется
         self.assertEqual(check_submission(accepts(assignment(21)), None, [zip_]), [])
         self.assertEqual(check_submission(None, None, [zip_]), [])   # настроек нет — пропускаем
+
+
+class GradeOfTest(unittest.TestCase):
+    def test_grade_of(self):
+        self.assertEqual(grade_of(fixture("submission_status_submitted")), "9.50000")
+        self.assertIsNone(grade_of(fixture("submission_status_new")))
+        self.assertIsNone(grade_of({"feedback": {"grade": {"grade": "-1.00000"}}}))
+        self.assertIsNone(grade_of({"feedback": {"grade": {"grade": "n/a"}}}))
+        self.assertEqual(grade_of({"feedback": {"grade": {"grade": "0.00000"}}}), "0.00000")
 
 
 class AssignsTest(unittest.TestCase):

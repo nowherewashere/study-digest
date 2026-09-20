@@ -8,7 +8,7 @@ import time
 from . import files, hosting, local, update
 from .config import Course, StudyError
 from .fmt import md_table, moment, parse_name, plain, short_name, weekday
-from .moodle import feedback_text
+from .moodle import feedback_text, grade_of
 from .snapshot import load_state, save_state
 
 # Что считаем новостью в core_course_get_updates_since; остальное (submissions, grades,
@@ -150,7 +150,7 @@ class Collector:
             st = self.moodle.submission_status(item["assign_id"])
             sub = (st.get("lastattempt") or {}).get("submission") or {}
             item["submission"] = sub.get("status") or "new"
-            item["grade"] = ((st.get("feedback") or {}).get("grade") or {}).get("grade")
+            item["grade"] = grade_of(st)   # -1 (отзыв без оценки) — не оценка
             # Очная защита может быть оценена без загрузки файла: Moodle оставляет status="new".
             if item["grade"] is not None and item["submission"] == "new":
                 item["submission"] = "submitted"

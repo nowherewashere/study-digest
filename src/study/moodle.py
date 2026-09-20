@@ -162,6 +162,16 @@ class Moodle:
 
 # --- ответ преподавателя
 
+def grade_of(status):
+    """Балл из mod_assign_get_submission_status как строка Moodle («9.50000»); нет оценки —
+    None. Отрицательный балл — ASSIGN_GRADE_NOT_SET: преподаватель сохранил отзыв без оценки."""
+    grade = ((status.get("feedback") or {}).get("grade") or {}).get("grade")
+    try:
+        return grade if grade is not None and float(grade) >= 0 else None
+    except ValueError:
+        return None
+
+
 def feedback_text(status):
     """Текст отзыва из mod_assign_get_submission_status: плагин «Feedback comments» —
     `feedback.plugins[].editorfields[]` с name == "comments". Нет отзыва — None."""

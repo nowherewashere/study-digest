@@ -8,7 +8,7 @@ import re
 from . import local
 from .config import ROOT, StudyError
 from .fmt import moment, parse_name, plain, short_name
-from .moodle import accepts, accepts_line, feedback_text
+from .moodle import accepts, accepts_line, feedback_text, grade_of
 
 SUBMISSION = {"new": "не сдано", "draft": "черновик", "reopened": "на доработку",
               "submitted": "сдано"}
@@ -79,8 +79,8 @@ def build(cfg, moodle, course, what):
             "submission": {"status": sub.get("status") or "new",
                            "attempt": sub.get("attemptnumber"),
                            "modified": moment(sub.get("timemodified"))},
-            "grade": (fb.get("grade") or {}).get("grade"),
-            "grade_text": fb.get("gradefordisplay"),
+            "grade": grade_of(st),
+            "grade_text": fb.get("gradefordisplay") if grade_of(st) is not None else None,
             "feedback": feedback_text(st), "flow": flow,
             "local": on_disk(cfg, course.code, num, flow), "stash": in_stash(course.code, num)}
 

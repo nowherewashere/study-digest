@@ -89,7 +89,11 @@ Moodle 4.5 на `https://esystem.rudn.ru` (адрес — `TUIS_URL` в `config.
   есть `fileurl` вида `…/webservice/pluginfile.php/<contextid>/<компонент>/…`; скачивается
   он обычным GET с токеном в query: `<fileurl>&token=<токен>` (проверено 10.09.2026, 200 OK).
   Полезные поля рядом: `filename`, `filesize`, `timemodified` — по последнему видно, что файл
-  перезалит, но не что он появился (см. выше). Элементы `mod_page` отдают `index.html`
+  перезалит, но не что он появился (см. выше).
+- **Оценка без файла.** Очную защиту оценивают без submission: у `mod_assign_get_submission_status`
+  `lastattempt.submission.status` остаётся `new`, а `feedback.grade.grade` заполнен — сводка
+  считает такую работу сданной (#2). Отзыв, сохранённый без оценки, приходит с `grade: -1`
+  (`ASSIGN_GRADE_NOT_SET`) — это не оценка. Элементы `mod_page` отдают `index.html`
   с `filesize: 0` — это не файл, а страница.
 - **Массивы параметров кодируются по-Moodle**: `courseids[0]=<id>&courseids[1]=<id>`,
   а не повторением ключа и не JSON-массивом.
