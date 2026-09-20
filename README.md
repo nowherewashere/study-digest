@@ -107,8 +107,10 @@
 - **ЛР 3 — Индексы и планы запросов** · databases · до 12.10 23:59 · 4 дн · методички: databases/stash/
 ```
 
-«Горит» — несданное, что просрочено или сдаётся в ближайшую неделю; это вывод программы,
-агент к нему ничего не дописывает.
+«Горит» — несданное, что просрочено или сдаётся в ближайшую неделю и что ТУИС ещё примет:
+работа с закрытым приёмом (у РУДН cutoff = срок) остаётся в «Сроках» как «приём закрыт»,
+а в «Горит» идёт её «Пересдача …»; очное задание без ответа в ТУИС — тоже не «Горит».
+Это вывод программы, агент к нему ничего не дописывает.
 
 ## Требования
 
@@ -276,12 +278,15 @@ MSYS_NO_PATHCONV=1 wsl.exe -d <дистрибутив> -- bash -c '~/work/study/
 
 `study digest` (и `tuis` внутри `state`): `first_run`, `since`, `courses`, `new_courses`,
 `deadlines` (в окне), `overdue` (просрочено, не сдано), `submitted` (просрочено, сдано),
-`not_started` (несданное из обоих списков — источник «Горит»), `retakes` (пересдачи
+`not_started` (несданное из обоих списков, кроме закрытых к приёму и очных — источник
+«Горит»), `retakes` (пересдачи
 с `retake_of` и `needed`), `quizzes`, `updates` (новое в курсах), `new_assignments`, `moved`
 (сдвинутые сроки), `notifications`, `announcements` (новое в форумах объявлений), `feedback`
 (новые отзывы преподавателя), `grades`, `outside` (сроки в скрытых курсах), `errors`.
-У каждого задания: `assign_id`, `cmid`, `course`, `name`, `short`, `due`, `submission`,
-`grade`, `intro`, `lab`, `retake`. Время везде — объект `{ts, iso, text, full, left,
+У каждого задания: `assign_id`, `cmid`, `course`, `name`, `short`, `due` (с учётом продления),
+`submission` (`new` · `draft` · `reopened` · `submitted` · `offline` · `hidden`), `graded`,
+`grade`, `feedback`, `closed` (приём закрыт), `opens`, `canedit`, `locked`, `intro`, `lab`,
+`retake`. Время везде — объект `{ts, iso, text, full, left,
 left_sec, overdue}`.
 
 ### Сводка и работы

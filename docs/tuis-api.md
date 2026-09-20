@@ -35,7 +35,8 @@ Moodle 4.5 на `https://esystem.rudn.ru` (адрес — `TUIS_URL` в `config.
 | `mod_forum_get_forums_by_courses` | форумы курсов; объявления — `type: news` | `courseids[]` |
 | `mod_forum_get_forum_discussions` | обсуждения форума (`discussions[]`: `id`, `subject`, `message`, `userfullname`, `timemodified`); на старом Moodle — `mod_forum_get_forum_discussions_paginated`, клиент переключается сам по `invalidrecord` | `forumid`, `page`, `perpage` |
 | `/webservice/upload.php` | загрузка файла в черновую область, возвращает `itemid` | `token`, `filearea=draft`, `itemid`, `file_1=@файл` |
-| `mod_assign_save_submission` | сохранение ответа на задание | `assignmentid`, `plugindata[onlinetext_editor][text]`, `[format]=4`, `[itemid]=0`, `plugindata[files_filemanager]=<itemid>` |
+| `mod_assign_save_submission` | сохранение ответа на задание (при `submissiondrafts=0` — сдача) | `assignmentid`, `plugindata[onlinetext_editor][text]`, `[format]=4`, `[itemid]=0`, `plugindata[files_filemanager]=<itemid>` |
+| `mod_assign_submit_for_grading` | сдача черновика при `submissiondrafts=1`; `acceptsubmissionstatement` — PARAM_BOOL, слать `1`/`0`, при `requiresubmissionstatement=1` обязательна единица | `assignmentid`, `acceptsubmissionstatement` |
 
 Виды `updates` у `core_course_get_updates_since`: `contentfiles` и `contents` — новые
 или изменённые файлы, `configuration` — правка настроек модуля, `submissions`,
@@ -49,7 +50,6 @@ Moodle 4.5 на `https://esystem.rudn.ru` (адрес — `TUIS_URL` в `config.
 
 | Функция | Зачем |
 |---------|-------|
-| `mod_assign_submit_for_grading` | явная отправка на проверку (в наших курсах не нужна: `submissiondrafts=0`, сохранение = сдача) |
 | `core_calendar_get_calendar_upcoming_view` | то же в виде готового блока «предстоящее» |
 | `gradereport_user_get_grade_items` | оценки и баллы по курсу |
 | `core_completion_get_activities_completion_status` | отметки о выполнении элементов курса |
@@ -90,11 +90,41 @@ Moodle 4.5 на `https://esystem.rudn.ru` (адрес — `TUIS_URL` в `config.
   он обычным GET с токеном в query: `<fileurl>&token=<токен>` (проверено 10.09.2026, 200 OK).
   Полезные поля рядом: `filename`, `filesize`, `timemodified` — по последнему видно, что файл
   перезалит, но не что он появился (см. выше).
-- **Оценка без файла.** Очную защиту оценивают без submission: у `mod_assign_get_submission_status`
-  `lastattempt.submission.status` остаётся `new`, а `feedback.grade.grade` заполнен — сводка
-  считает такую работу сданной (#2). Отзыв, сохранённый без оценки, приходит с `grade: -1`
-  (`ASSIGN_GRADE_NOT_SET`) — это не оценка. Элементы `mod_page` отдают `index.html`
-  с `filesize: 0` — это не файл, а страница.
+- Элементы `mod_page` отдают `index.html` с `filesize: 0` — это не файл, а страница.
+- **Состояние ответа — не одно поле.** Всю семантику знает `moodle.submission_state()`; правила:
+  - **Оценка без файла.** Очную защиту оценивают без submission: `lastattempt.submission.status`
+    остаётся `new`, а `feedback.grade.grade` заполнен — это «сдано» (#2). Отзыв, сохранённый
+    без оценки, приходит с `grade: -1` (`ASSIGN_GRADE_NOT_SET`) — это не оценка.
+  - **«Приём закрыт» ≠ «просрочено».** У 42 из 43 заданий РУДН `cutoffdate == duedate`: после
+    срока ответ не принимается, сдаётся только через отдельное задание «Пересдача …». Признак —
+    не дата, а `lastattempt.canedit = false`: это серверный `assign::submissions_open()`
+    (cutoff, продление, `locked`, блокировка в журнале, истёкшая запись). `cutoffdate` — только
+    для подписи. `lastattempt.cansubmit` — кнопка «Отправить», при `submissiondrafts=0` всегда
+    `false`; как признак «можно ли сдать» непригоден.
+  - `lastattempt.extensionduedate` (бывает `0`, `null` и ts) — индивидуальное продление: заменяет
+    `duedate` и поднимает cutoff. В снимок пишется исходный `duedate`, иначе «срок сдвинут»
+    каждый день.
+  - `teamsubmission=1` у задания → статус в `lastattempt.teamsubmission.status`, свой
+    `submission` может остаться `new` (сдал одногруппник).
+  - `lastattempt.submissionsenabled=false` / `nosubmissions=1` — плагинов ответа нет, сдаётся
+    очно: статус `offline`, в «Горит» не попадает, `study submit` отказывает.
+  - `allowsubmissionsfromdate` в будущем — приём ещё не открыт: «откроется DD.MM».
+  - `submissiondrafts=1` (в РУДН нет, но бывает): `save_submission` даёт черновик, сдача —
+    `submit_for_grading`.
+  - Задание без `duedate` ни в один раздел сводки не попадает (только в `study assigns`
+    и как «новое задание»); просроченное старше 30 дней уходит из сводки молча — при
+    cutoff = срок это верно, сдавать его уже некуда.
+- **Ручки записи не бросают `exception` при отказе**: `mod_assign_save_submission` и
+  `mod_assign_submit_for_grading` возвращают HTTP 200 и список `[{item, itemid, warningcode,
+  message}]`; причина — в `item` («The due date for this assignment has now passed», «Nothing was
+  submitted»), `message` общий. Пустой список — успех. Клиент превращает непустой в
+  `StudyError(code=warningcode)`; настоящий `exception` приходит только на `locked`
+  (`submissionslocked`).
+- `mod_choice_get_choice_options`: `disabled=true` — вариант заполнен (`maxanswers`) или выбор
+  закрыт; в «N вариантов» считаются только открытые. Тесты: `abandoned`-попытка входит в лимит
+  (Moodle считает finished + abandoned), `timeclose=0` — не срок, `timeopen` в будущем —
+  «откроется». Скрытые оценки (`gradeishidden`, `gradehiddenbydate`) приходят как
+  `graderaw: null` — неотличимы от «не оценено», сводка так их и считает.
 - **Массивы параметров кодируются по-Moodle**: `courseids[0]=<id>&courseids[1]=<id>`,
   а не повторением ключа и не JSON-массивом.
 - **Ошибка приходит с HTTP 200.** Тело вида `{"exception": …, "errorcode": …, "message": …}`
