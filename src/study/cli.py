@@ -9,7 +9,7 @@ import pathlib
 import sys
 import time
 
-from . import agent, answer, courses, digest, files, hosting, local, setup, update
+from . import agent, answer, courses, digest, files, hosting, local, setup, task, update
 from .config import Config, Course, StudyError
 from .fmt import moment, plain, table
 from .moodle import Moodle, accepts, accepts_line, check_submission, mb
@@ -368,6 +368,11 @@ def cmd_answer(cfg, args):
     return d, answer.render(d)
 
 
+def cmd_task(cfg, args):
+    d = task.build(cfg, Moodle(cfg), course_of(cfg, args.course), args.what)
+    return d, task.render(d)
+
+
 def cmd_update(cfg, args):
     d = update.check()
     if d is None:
@@ -490,6 +495,10 @@ def tuis_parsers(sub):
     s.add_argument("--itemid", type=int, default=0, help="добавить к существующему itemid")
 
     submit_parser(sub)
+    s = add(sub, "task", "карточка задания: текст, срок, состояние, что принимает, что на диске",
+            cmd_task)
+    s.add_argument("course", help="код предмета или id курса")
+    s.add_argument("what", help="NN — лабораторная по номеру, иначе id задания (study assigns)")
 
 
 def submit_parser(sub):

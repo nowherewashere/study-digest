@@ -3,6 +3,7 @@ import re
 
 from . import net
 from .config import StudyError
+from .fmt import plain
 
 PAGE = 50   # предел limitnum у календаря
 WRITE = {"mod_assign_save_submission"}   # необратимые ручки: без повторов (см. net.RETRIES)
@@ -142,6 +143,18 @@ class Moodle:
         if itemid:
             params["plugindata[files_filemanager]"] = itemid
         return self.call("mod_assign_save_submission", **params)
+
+
+# --- ответ преподавателя
+
+def feedback_text(status):
+    """Текст отзыва из mod_assign_get_submission_status: плагин «Feedback comments» —
+    `feedback.plugins[].editorfields[]` с name == "comments". Нет отзыва — None."""
+    for plugin in (status.get("feedback") or {}).get("plugins") or []:
+        for field in plugin.get("editorfields") or []:
+            if field.get("name") == "comments" and field.get("text"):
+                return plain(field["text"], 2000)
+    return None
 
 
 # --- правила сдачи задания
