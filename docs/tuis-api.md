@@ -76,7 +76,10 @@ Moodle 4.5 на `https://esystem.rudn.ru` (адрес — `TUIS_URL` в `config.
 - **`mod_assign_get_assignments` показывает не все задания.** Элементы с ограничением
   доступа (например, «Сдать доклад» до выбора темы) в ответ не попадают, вместо них
   приходит `warnings: No access rights in module context`. Сроки таких заданий видны
-  только через `core_course_get_contents` в поле `dates` — сводка берёт их оттуда.
+  только через `core_course_get_contents` в поле `dates`, причина — в `availabilityinfo`
+  (`uservisible: false`). Обе ручки сливает реестр `study/assigns.py`: задание из состава
+  курса известно по `cmid`, `assign_id` у него нет, поэтому статус ответа не спросить
+  (`requireloginerror`) и отправить нечего.
 - **В календаре Moodle нет расписания занятий** — только сроки сдач (`due`, `close`).
   Расписание живёт в отдельных службах РУДН (`rudn_get_calendar_monthly_view`,
   `local_course_tasks_service`), у каждой свой токен на странице «Ключи безопасности»;
