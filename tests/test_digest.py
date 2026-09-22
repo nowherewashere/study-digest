@@ -149,9 +149,10 @@ class CollectorTest(DigestCase):
         # ЛР 2 сдана — её пересдача не срок; ЛР 5 старше окна, не сдана — пересдача нужна
         _, d = self.collect()
         # скрытая пересдача ЛР 1 курса 2 (из состава курса): ЛР 1 сдана — не срок
+        # порядок — по сроку, при равных сроках по курсу: у пересдачи ЛР 1 курс без папки
         self.assertEqual([(r["short"], r["retake_of"], r["needed"]) for r in d["retakes"]],
-                         [("Пересдача ЛР 2", 12, False), ("Пересдача ЛР 5", 19, True),
-                          ("Пересдача ЛР 1", 21, False)])
+                         [("Пересдача ЛР 1", 21, False), ("Пересдача ЛР 2", 12, False),
+                          ("Пересдача ЛР 5", 19, True)])
         self.assertIn("Пересдача ЛР 5", names(d["deadlines"]))
         self.assertNotIn("Пересдача ЛР 2", names(d["deadlines"]) + names(d["not_started"]))
         self.assertNotIn("Пересдача", names(d["new_assignments"]))

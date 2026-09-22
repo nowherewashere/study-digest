@@ -111,9 +111,11 @@ class Registry:
     состав курса — по курсу; неудача состава мягкая, если дан `soft` (сводке нельзя падать
     из-за одного курса), иначе ошибка идёт наверх."""
 
-    def __init__(self, moodle, courseids=None, soft=None):
+    def __init__(self, moodle, courseids=None, soft=None, contents=None):
         self.moodle = moodle
         self.courseids = list(courseids) if courseids else None
+        # состав курса можно дать своим callable: у сводки он кеширующий и мягкий на весь обход
+        self._contents = contents or moodle.contents
         self.warnings = []
         self._soft = soft
         self._api = None
@@ -151,7 +153,7 @@ class Registry:
             self._sections[course.id] = []
             with self.guard(f"состав курса {course.id}"):
                 self._sections[course.id] = [(m, s.get("name") or "")
-                                             for s in self.moodle.contents(course.id)
+                                             for s in self._contents(course.id)
                                              for m in s.get("modules") or []]
         return self._sections[course.id]
 

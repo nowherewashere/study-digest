@@ -5,9 +5,9 @@
 import time
 
 from . import files, hosting, local, update
+from .assigns import KINDS, SUBMISSION, Registry
 from .config import Course, StudyError, soft
-from .fmt import lab_number, md_table, moment, plain, short_name, weekday
-from . import moodle as moodle_api
+from .fmt import md_table, moment, plain, short_name, weekday
 from .moodle import PENDING, submission_state
 from .snapshot import load_state, save_state
 
@@ -15,11 +15,6 @@ from .snapshot import load_state, save_state
 # answers) — своя же активность и чужие голоса, то есть шум.
 USEFUL = {"contentfiles", "introfiles", "configuration", "contents", "files"}
 FILES = {"contentfiles", "files", "contents"}
-# Сроки в составе курса: машинные идентификаторы, а не подписи — подпись зависит от языка.
-DATE_IDS = {"duedate", "timeclose"}
-KINDS = {"assign": "задание", "choice": "выбор темы",
-         "workshop": "взаимная проверка", "feedback": "опрос"}
-SUBMISSION = {**moodle_api.SUBMISSION, "hidden": "доступ закрыт"}
 # Уведомления, которые Moodle шлёт сам: про наши же действия, про сроки (они уже в таблице)
 # и про входы в аккаунт. Отсев по eventtype, а не по теме: тема зависит от языка.
 AUTO_EVENTS = {"assign_due_soon", "assign_due_digest", "assign_notification", "newlogin"}
@@ -42,7 +37,10 @@ def news(course, m, section, what):
 
 
 def by_due(items):
-    return sorted(items, key=lambda x: x["due"]["ts"])
+    """По сроку; при равных сроках — по курсу и названию, чтобы порядок не зависел от того,
+    в каком порядке ТУИС отдал курсы и задания."""
+    return sorted(items, key=lambda x: (x["due"]["ts"], x["course"].get("code") or "",
+                                        x["short"]))
 
 
 class Collector:
@@ -63,6 +61,7 @@ class Collector:
         self._forums = {}                             # курс → [id обсуждений], что прочитали
         self.errors = list(errors)                    # с чем пришёл снимок
         self.courses = {c.id: c for c in cfg.track(moodle.courses())}
+        self.reg = Registry(moodle, soft=self.soft, contents=self.contents)
         self.ignore = cfg.ignore()   # решение пользователя: этих курсов в сводке нет вовсе
         self.assigns = {}       # id задания → строка сводки (для снимка)
         self.raw = {}           # id задания → сырое задание из mod_assign_get_assignments
@@ -93,22 +92,15 @@ class Collector:
     def assignments(self):
         """Задания из mod_assign: сроки в окне и просроченные; новые и сдвинутые — против снимка."""
         new, moved = [], []
-        course_list, _ = self.moodle.assignments()
-        for c in course_list:
-            if c["id"] not in self.courses:
-                continue
-            for a in c["assignments"]:
-                item = {"kind": "assign", "source": "assign_api", "assign_id": a["id"],
-                        "cmid": a["cmid"], "course": self.course(c["id"]), "name": a["name"],
-                        "short": short_name(a["name"]), "due": moment(a.get("duedate"), self.now),
-                        "submission": None, "intro": plain(a.get("intro")),
-                        "lab": lab_number(a["name"]), "retake": lab_number(a["name"], "retake"),
-                        "graded": False, "closed": False, "opens": None, "canedit": None,
-                        "locked": False}
-                self.assigns[str(a["id"])] = item
-                self.raw[a["id"]] = a
-                due = a.get("duedate") or 0
-                prev = self.known.get(str(a["id"]))
+        for course in self.courses.values():
+            # состав курса здесь не нужен: задания, которых mod_assign не отдал, добирает
+            # activities() — у них нет ни id, ни состояния ответа, только срок
+            for w in self.reg.works(course, contents=False):
+                item = w.as_item(self.now)
+                self.assigns[str(w.assign_id)] = item
+                self.raw[w.assign_id] = w.raw
+                due = w.due or 0
+                prev = self.known.get(str(w.assign_id))
                 # пересдача — не новость: новостью была сама лаба
                 if self.since and prev is None and not item["retake"]:
                     new.append(item)
@@ -169,22 +161,13 @@ class Collector:
         """Элементы курса со сроками — ловят задания, скрытые ограничением доступа.
         Статус ответа у них не запросить (requireloginerror), поэтому сразу "hidden"."""
         seen = {a["cmid"] for a in self.assigns.values()}
-        for cid in self.courses:
-            for sec in self.contents(cid):
-                for m in sec.get("modules", []):
-                    if m["id"] in seen or m["modname"] not in KINDS:
-                        continue
-                    for d in m.get("dates") or []:
-                        ts = d.get("timestamp") or 0
-                        if d.get("dataid") in DATE_IDS and self.within(ts):
-                            self.soon.append({
-                                "kind": "activity", "source": "course_contents",
-                                "modname": m["modname"], "cmid": m["id"],
-                                "course": self.course(cid), "name": m["name"],
-                                "short": short_name(m["name"]), "due": moment(ts, self.now),
-                                "submission": "hidden" if m["modname"] == "assign" else None,
-                                "intro": "", "lab": lab_number(m["name"]),
-                                "retake": lab_number(m["name"], "retake")})
+        others = set(KINDS) - {"assign"}
+        for course in self.courses.values():
+            works = [w for w in self.reg.works(course) if w.cmid not in seen]
+            works += self.reg.modules(course, others)
+            for w in works:
+                if w.due and self.within(w.due):
+                    self.soon.append(w.as_item(self.now))
         # скрытая пересдача сданной лабы — тоже не срок
         self.retakes([a for a in self.soon if a["source"] == "course_contents" and a["retake"]])
 
