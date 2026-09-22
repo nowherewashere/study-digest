@@ -55,6 +55,20 @@ class RegistryTest(unittest.TestCase):
         self.assertEqual(r.find(self.course, "13").assign_id, 13)    # id, лабы № 13 нет
         self.assertEqual(r.find(self.course, "115").cmid, 115)       # скрытое — только по cmid
 
+    def test_find_by_number_of_any_work(self):
+        """Работы бывают не только лабами: у «Решение задачи N ИДЗ» номер тоже должен искаться,
+        причём у такого задания есть только cmid — mod_assign его не отдаёт."""
+        self.net.reply("POST", ("mod_assign_get_assignments", "courseids[0]=2"),
+                       {"courses": [], "warnings": []})
+        self.net.reply("POST", ("core_course_get_contents", "courseid=2"),
+                       [{"name": "ИДЗ", "modules": [
+                           {"id": 301, "name": "Решение задачи 1 ИДЗ", "modname": "assign",
+                            "uservisible": False, "availabilityinfo": "Нужна группа НФИбд-01-24",
+                            "dates": [{"dataid": "duedate", "timestamp": 1790196900}]}]}])
+        r = assigns.Registry(self.m, [2])
+        w = r.find(Course(2, "markov", "Марковские процессы"), "1")
+        self.assertEqual((w.cmid, w.short, w.num, w.lab), (301, "Задача 1", "01", None))
+
     def test_find_says_what_is_wrong(self):
         r = self.both()
         with self.assertRaises(StudyError) as e:

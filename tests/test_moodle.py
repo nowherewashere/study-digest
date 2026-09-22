@@ -238,6 +238,23 @@ class AssignsTest(unittest.TestCase):
         self.assertNotIn("<p>", text)
         self.assertIn("id=11 cmid=111", text)
 
+    def test_hidden_rows_when_course_known(self):
+        """С указанным курсом виден и состав курса: задания, которых mod_assign не отдал,
+        печатаются строками с причиной, а не счётчиком «Скрыто ограничением доступа»."""
+        tmp = tmpdir(self)
+        net_ = FakeNet().install(self)
+        net_.reply("POST", ("mod_assign_get_assignments", "courseids[0]=1"),
+                   fixture("assignments"))
+        net_.reply("POST", ("core_course_get_contents", "courseid=1"), fixture("course_contents"))
+        data, text = cli.cmd_assigns(config(tmp, "CODE 1 nettech\n"),
+                                     argparse.Namespace(course="nettech"))
+        row = next(r for r in data["assignments"] if r["cmid"] == 115)
+        self.assertEqual((row["assign_id"], row["available"], row["source"]),
+                         (None, False, "course_contents"))
+        self.assertIn("cmid=115", text)
+        self.assertIn("доступ закрыт: Недоступно", text)
+        self.assertNotIn("Скрыто ограничением доступа", text)
+
 
 class SubmitTest(unittest.TestCase):
     def setUp(self):
@@ -265,6 +282,16 @@ class SubmitTest(unittest.TestCase):
                 if a["id"] == aid:
                     a.update(patch)
         return d
+
+    def test_unknown_assign_id_refused(self):
+        """id, которого нет в mod_assign (часто это cmid из сводки или закрытое задание):
+        отказ до похода за статусом, иначе Moodle ответит невнятной ошибкой."""
+        args = argparse.Namespace(assign_id=115, text=None, attach=None, files=None, confirm=True)
+        self.net.reply("POST", "mod_assign_get_assignments", fixture("assignments"))
+        plan, _text, rc = cli.cmd_submit(self.cfg, args)
+        self.assertEqual(rc, 1)
+        self.assertIn("задание id 115 не найдено", " ".join(plan["problems"]))
+        self.assertEqual(self.net.calls("mod_assign_get_submission_status"), [])
 
     def test_plan(self):
         plan, text, rc = self.submit(attach=[str(self.pdf)])

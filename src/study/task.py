@@ -7,26 +7,10 @@ import re
 import time
 
 from . import local
-from .config import ROOT, StudyError
-from .fmt import moment, parse_name, plain, short_name
-from .moodle import PENDING, SUBMISSION, accepts, accepts_line, submission_state
-
-
-def find(assigns, what, label):
-    """Задание по номеру лабы (NN, как в labs/labNN) или по id из `study assigns`."""
-    m = re.fullmatch(r"(?:lab)?(\d{1,2})", what.strip().lower())
-    if m:
-        num = m.group(1).zfill(2)
-        for a in assigns:
-            p = parse_name(a["name"])
-            if p and p["work"] == "lab" and p["num"].zfill(2) == num:
-                return a
-    if what.strip().isdigit():
-        for a in assigns:
-            if a["id"] == int(what):
-                return a
-    raise StudyError("moodle", f"в курсе {label} нет задания «{what}»: "
-                               f"study assigns --course {label}")
+from .assigns import SUBMISSION, Registry
+from .config import ROOT, soft
+from .fmt import moment, plain
+from .moodle import PENDING, accepts, accepts_line, submission_state
 
 
 def on_disk(cfg, code, num, flow):
@@ -55,34 +39,41 @@ def in_stash(code, num):
 
 
 def build(cfg, moodle, course, what):
-    course_list, _ = moodle.assignments([course.id])
-    c = next((x for x in course_list if x["id"] == course.id), None)
-    label = course.code or str(course.id)
-    a = find(c["assignments"] if c else [], what, label)
-    st = moodle.submission_status(a["id"])
+    """Карточка задания. Задание, которого mod_assign не отдал (ограничение доступа), знает
+    только то, что видно в составе курса: статус ответа по нему не спросить."""
+    errors = []
+    reg = Registry(moodle, [course.id], soft=lambda where: soft(errors, where))
+    w = reg.find(course, what)
+    flow = local.flow_of(cfg, course.code) if course.code else None
+    d = {"course": {"id": course.id, "code": course.code,
+                    "title": reg.title(course.id) or course.title},
+         "assign_id": w.assign_id, "cmid": w.cmid, "name": w.name, "short": w.short,
+         "num": w.lab, "source": w.source, "available": w.available, "reason": w.reason,
+         "section": w.section, "flow": flow,
+         "local": on_disk(cfg, course.code, w.lab, flow), "stash": in_stash(course.code, w.lab),
+         "warnings": errors}
+    if not w.available:
+        return dict(d, due=moment(w.due), opens=moment(w.opens), closed=True, locked=False,
+                    canedit=False, team=False, graded=False, accepts=None, accepts_line="—",
+                    intro=w.intro, attachments=[], grade=None, grade_text=None, feedback=None,
+                    submission={"status": "hidden", "attempt": None, "modified": None})
+    a = w.raw
+    st = moodle.submission_status(w.assign_id)
     sub = (st.get("lastattempt") or {}).get("submission") or {}
     fb = st.get("feedback") or {}
     s = submission_state(a, st, int(time.time()))
-    p = parse_name(a["name"])
-    num = p["num"].zfill(2) if p and p["work"] == "lab" else None
-    flow = local.flow_of(cfg, course.code) if course.code else None
     acc = accepts(a)
-    return {"course": {"id": course.id, "code": course.code,
-                       "title": c["fullname"] if c else course.title},
-            "assign_id": a["id"], "cmid": a["cmid"], "name": a["name"],
-            "short": short_name(a["name"]), "num": num, "due": moment(s["due"]),
-            "opens": moment(s["opens"]), "closed": s["closed"], "locked": s["locked"],
-            "canedit": s["canedit"], "team": s["team"], "graded": s["graded"],
-            "accepts": acc, "accepts_line": accepts_line(acc),
-            "intro": plain(a.get("intro"), 20000),
-            "attachments": [{"name": f.get("filename"), "url": f.get("fileurl")}
-                            for f in a.get("introattachments") or []],
-            "submission": {"status": s["status"], "attempt": sub.get("attemptnumber"),
-                           "modified": moment(sub.get("timemodified"))},
-            "grade": s["grade"],
-            "grade_text": fb.get("gradefordisplay") if s["grade"] is not None else None,
-            "feedback": s["feedback"], "flow": flow,
-            "local": on_disk(cfg, course.code, num, flow), "stash": in_stash(course.code, num)}
+    return dict(d, due=moment(s["due"]), opens=moment(s["opens"]), closed=s["closed"],
+                locked=s["locked"], canedit=s["canedit"], team=s["team"], graded=s["graded"],
+                accepts=acc, accepts_line=accepts_line(acc),
+                intro=plain(a.get("intro"), 20000),
+                attachments=[{"name": f.get("filename"), "url": f.get("fileurl")}
+                             for f in a.get("introattachments") or []],
+                submission={"status": s["status"], "attempt": sub.get("attemptnumber"),
+                            "modified": moment(sub.get("timemodified"))},
+                grade=s["grade"],
+                grade_text=fb.get("gradefordisplay") if s["grade"] is not None else None,
+                feedback=s["feedback"])
 
 
 def disk_line(d):
@@ -101,9 +92,12 @@ def disk_line(d):
             + ("; вложения: " + ", ".join(x["attachments"]) if x["attachments"] else ""))
 
 
-def render(d):
-    s, due = d["submission"], d["due"]
+def state_line(d):
+    s = d["submission"]
     state = SUBMISSION.get(s["status"], s["status"])
+    if not d.get("available", True):
+        # причина из ТУИС («Вы принадлежите к группе …») — единственное, что тут известно
+        return state + (f" · {d['reason']}" if d.get("reason") else "")
     if s["attempt"]:
         state += f" · попытка {s['attempt']}"
     if d["grade"] is not None:
@@ -114,8 +108,14 @@ def render(d):
         state += f" · откроется {d['opens']['full']}"
     elif d["closed"]:
         state += " · заблокировано" if d["locked"] else " · приём закрыт"
-    head = (f"{d['short']} · {d['course']['code'] or d['course']['title']} · id {d['assign_id']}"
-            f" · cmid {d['cmid']}")
+    return state
+
+
+def render(d):
+    due, state = d["due"], state_line(d)
+    head = " · ".join(x for x in [d["short"], d["course"]["code"] or d["course"]["title"],
+                                  f"id {d['assign_id']}" if d["assign_id"] else None,
+                                  f"cmid {d['cmid']}"] if x)
     out = [head, f"Срок: {due['full']} ({due['left']})" if due else "Срок: —",
            "Принимает: " + d["accepts_line"], "Состояние: " + state]
     if d["feedback"]:

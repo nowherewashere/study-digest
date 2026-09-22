@@ -16,6 +16,9 @@ class NamesTest(unittest.TestCase):
         self.assertEqual(fmt.parse_name("Сдать доклад. Лекция 4")["work"], "talk")
         self.assertEqual(fmt.parse_name("Пересдача лабораторной работы № 3"),
                          {"work": "retake", "num": "3", "topic": ""})
+        self.assertEqual(fmt.parse_name("Решение задачи 5 ИДЗ"),
+                         {"work": "task", "num": "5", "topic": ""})
+        self.assertEqual(fmt.short_name("Решение задачи 5 ИДЗ"), "Задача 5")
         self.assertIsNone(fmt.parse_name("Тест после лекции №1"))
         self.assertIsNone(fmt.parse_name(None))
 

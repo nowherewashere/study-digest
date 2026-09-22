@@ -11,14 +11,17 @@ from contextlib import nullcontext
 from dataclasses import dataclass, field
 from typing import Optional
 
+from . import moodle as moodle_api
 from .config import Course, StudyError
-from .fmt import lab_number, moment, plain, short_name
+from .fmt import lab_number, moment, parse_name, plain, short_name
 
 # Сроки в составе курса: машинные идентификаторы, а не подписи — подпись зависит от языка.
 DATE_IDS = {"duedate", "timeclose"}
 OPEN_IDS = {"allowsubmissionsfromdate", "timeopen"}
 KINDS = {"assign": "задание", "choice": "выбор темы",
          "workshop": "взаимная проверка", "feedback": "опрос"}
+# «hidden» — не статус Moodle, а наш: у задания из состава курса статуса ответа нет вовсе
+SUBMISSION = {**moodle_api.SUBMISSION, "hidden": "доступ закрыт"}
 
 
 @dataclass
@@ -47,6 +50,12 @@ class Work:
     @property
     def lab(self):
         return lab_number(self.name)
+
+    @property
+    def num(self):
+        """Номер работы любого вида: у курса бывают не лабы, а задачи ИДЗ или доклады."""
+        p = parse_name(self.name)
+        return p["num"].zfill(2) if p else None
 
     @property
     def retake(self):
@@ -108,17 +117,33 @@ class Registry:
         self.warnings = []
         self._soft = soft
         self._api = None
+        self._titles = {}
         self._works = {}
         self._sections = {}
 
     def guard(self, where):
         return self._soft(where) if self._soft else nullcontext()
 
-    def api(self, course_id):
+    def _load(self):
         if self._api is None:
             courses, self.warnings = self.moodle.assignments(self.courseids)
             self._api = {c["id"]: c.get("assignments") or [] for c in courses}
+            self._titles = {c["id"]: c.get("fullname") or "" for c in courses}
+
+    def api(self, course_id):
+        self._load()
         return self._api.get(course_id, [])
+
+    def title(self, course_id):
+        """Название курса так, как его зовёт ТУИС; у курса без заданий — пусто."""
+        self._load()
+        return self._titles.get(course_id)
+
+    def courses(self, codes=None):
+        """Курсы, о которых знает mod_assign, с именами локальных папок (строки CODE)."""
+        self._load()
+        codes = codes or {}
+        return [Course(cid, codes.get(cid), title) for cid, title in self._titles.items()]
 
     def sections(self, course):
         """Состав курса как [(модуль, имя раздела)]; не прочитался — пусто, ошибка уже учтена."""
@@ -130,14 +155,18 @@ class Registry:
                                              for m in s.get("modules") or []]
         return self._sections[course.id]
 
-    def works(self, course):
-        """Задания курса: всё из mod_assign плюс то, чего он не отдал (ограничение доступа)."""
+    def works(self, course, contents=True):
+        """Задания курса: всё из mod_assign плюс то, чего он не отдал (ограничение доступа).
+        `contents=False` — только mod_assign: состав курса стоит запроса на каждый курс,
+        и списку по всем курсам сразу он не по карману."""
+        api = [from_api(course, a) for a in self.api(course.id)]
+        if not contents:
+            return api
         if course.id not in self._works:
-            works = [from_api(course, a) for a in self.api(course.id)]
-            seen = {w.cmid for w in works}
-            works += [from_module(course, m, section) for m, section in self.sections(course)
-                      if m.get("modname") == "assign" and m["id"] not in seen]
-            self._works[course.id] = works
+            seen = {w.cmid for w in api}
+            self._works[course.id] = api + [
+                from_module(course, m, section) for m, section in self.sections(course)
+                if m.get("modname") == "assign" and m["id"] not in seen]
         return self._works[course.id]
 
     def modules(self, course, kinds):
@@ -155,8 +184,11 @@ class Registry:
         m = re.fullmatch(r"(?:lab)?(\d{1,2})", what.strip().lower())
         if m:
             num = m.group(1).zfill(2)
-            for w in works:
+            for w in works:                     # лаба важнее: у неё есть каталог labNN
                 if w.lab == num:
+                    return w
+            for w in works:
+                if w.num == num:
                     return w
         if what.strip().isdigit():
             n = int(what)

@@ -9,7 +9,7 @@ import pathlib
 import sys
 import time
 
-from . import agent, answer, courses, digest, files, hosting, local, setup, task, update
+from . import agent, answer, assigns, courses, digest, files, hosting, local, setup, task, update
 from .config import Config, Course, StudyError
 from .fmt import moment, plain, table
 from .moodle import (SUBMISSION, Moodle, accepts, accepts_line, check_state, check_submission,
@@ -75,25 +75,40 @@ def cmd_call(cfg, args):
     return out, json.dumps(out, ensure_ascii=False, indent=1)
 
 
+def assign_line(w, due):
+    """Строка задания; у скрытого ограничением нет id — только cmid и причина из ТУИС."""
+    head = f"  id={w.assign_id} cmid={w.cmid}" if w.available else f"  cmid={w.cmid}"
+    line = "{} до {}  {}".format(head, due["text"] if due else "—", w.name)
+    if w.available:
+        return line
+    # причина из Moodle бывает на полстроки («Глобальная группа … 2026/2027 уч. год …») —
+    # в списке нужен признак, целиком её показывает `study task`
+    return line + ("  — доступ закрыт: " + plain(w.reason, 60) if w.reason
+                   else "  — доступ закрыт")
+
+
 def cmd_assigns(cfg, args):
-    only = course_of(cfg, args.course).id if args.course else None
-    course_list, warnings = Moodle(cfg).assignments([only] if only else None)
+    """С указанным курсом читается и состав курса — там задания, которых mod_assign не отдаёт;
+    без курса берётся только mod_assign: состав пришлось бы спрашивать по каждому курсу."""
+    course = course_of(cfg, args.course) if args.course else None
+    reg = assigns.Registry(Moodle(cfg), [course.id] if course else None)
     rows, lines = [], []
-    for c in course_list:
-        if not c["assignments"]:
+    for c in [course] if course else reg.courses(cfg.codes()):
+        works = reg.works(c, contents=bool(course))
+        if not works:
             continue
-        lines.append("\n[{}] {}".format(c["id"], c["fullname"]))
-        for a in c["assignments"]:
-            due = moment(a.get("duedate"))
-            rows.append({"course": {"id": c["id"], "title": c["fullname"]},
-                         "assign_id": a["id"], "cmid": a["cmid"], "name": a["name"], "due": due,
-                         "intro": plain(a.get("intro"), 2000)})   # текст задания — только в JSON
-            lines.append("  id={} cmid={} до {}  {}".format(
-                a["id"], a["cmid"], due["text"] if due else "—", a["name"]))
-    if warnings:
-        lines.append(f"\nСкрыто ограничением доступа: {len(warnings)} "
-                     "(сроки видны в `study digest`)")
-    return {"assignments": rows, "warnings": warnings}, "\n".join(lines).lstrip()
+        lines.append(f"\n[{c.id}] {reg.title(c.id) or c.title}")
+        for w in works:
+            due = moment(w.due)
+            rows.append({"course": {"id": c.id, "title": reg.title(c.id) or c.title},
+                         "assign_id": w.assign_id, "cmid": w.cmid, "name": w.name, "due": due,
+                         "source": w.source, "available": w.available, "reason": w.reason,
+                         "intro": plain(w.intro, 2000)})   # текст задания — только в JSON
+            lines.append(assign_line(w, due))
+    if reg.warnings and not course:
+        lines.append(f"\nСкрыто ограничением доступа: {len(reg.warnings)} "
+                     "(видно в `study assigns --course <код>` и в сводке)")
+    return {"assignments": rows, "warnings": reg.warnings}, "\n".join(lines).lstrip()
 
 
 def cmd_calendar(cfg, args):
@@ -174,6 +189,15 @@ def cmd_upload(cfg, args):
     return out, "itemid: {} · загружено: {}".format(itemid, ", ".join(out["files"]))
 
 
+def unknown_assign(args):
+    problem = (f"задание id {args.assign_id} не найдено в mod_assign: проверь номер "
+               f"(`study task <код> {args.assign_id}`) — это может быть cmid из сводки "
+               "или задание, закрытое ограничением доступа")
+    plan = {"assign_id": args.assign_id, "name": None, "due": None, "accepts": None,
+            "state": None, "problems": [problem], "confirmed": bool(args.confirm)}
+    return plan, "Нельзя отправить:\n  – " + problem, 1
+
+
 def cmd_submit(cfg, args):
     """План сверяется с настройками задания (что принимает) и с файлами на диске; при
     несовпадении — отказ даже с --confirm. Вложения из --attach грузятся только при отправке."""
@@ -183,7 +207,11 @@ def cmd_submit(cfg, args):
     course_list, _ = m.assignments()
     found = next((a for c in course_list for a in c["assignments"]
                   if a["id"] == args.assign_id), None)
-    acc = accepts(found) if found else None
+    if found is None:
+        # id из сводки бывает cmid, а закрытого ограничением задания в mod_assign нет вовсе:
+        # без него нельзя ни проверить приём, ни отправить — отказ до похода за статусом
+        return unknown_assign(args)
+    acc = accepts(found)
     state = submission_state(found or {}, m.submission_status(args.assign_id), int(time.time()))
     problems = check_submission(acc, text, attach, args.files) + check_state(
         state, lambda ts: moment(ts)["full"])
