@@ -126,4 +126,8 @@ def render(d):
         out.append("В stash (возможно по теме): " + ", ".join(d["stash"]))
     for f in d["attachments"]:
         out.append(f"Вложение задания: {f['name']} — {f['url']}")
+    if d["warnings"]:
+        # состав курса не прочитался: карточка неполная, и об этом нельзя молчать
+        out.append("Не удалось: " + "; ".join(
+            f"{w['source']} · {w['where']} · {w['message'][:80]}" for w in d["warnings"]))
     return "\n".join(out) + "\n\n" + (d["intro"] or "(текста задания нет)")

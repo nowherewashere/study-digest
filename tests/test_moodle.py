@@ -238,6 +238,48 @@ class AssignsTest(unittest.TestCase):
         self.assertNotIn("<p>", text)
         self.assertIn("id=11 cmid=111", text)
 
+    def test_contents_failure_does_not_kill_list(self):
+        """Состав курса — добавка к mod_assign: его сбой не должен уносить весь список."""
+        tmp = tmpdir(self)
+        net_ = FakeNet().install(self)
+        net_.reply("POST", ("mod_assign_get_assignments", "courseids[0]=1"),
+                   fixture("assignments"))
+        net_.reply("POST", ("core_course_get_contents", "courseid=1"),
+                   StudyError("moodle", "HTTP 502"))
+        data, text = cli.cmd_assigns(config(tmp, "CODE 1 nettech\n"),
+                                     argparse.Namespace(course="nettech"))
+        self.assertIn("id=11 cmid=111", text)
+        self.assertIn("Не удалось: moodle · состав курса 1 · HTTP 502", text)
+        self.assertEqual([e["where"] for e in data["errors"]], ["состав курса 1"])
+
+    def test_course_without_assignments_says_so(self):
+        tmp = tmpdir(self)
+        net_ = FakeNet().install(self)
+        net_.reply("POST", ("mod_assign_get_assignments", "courseids[0]=9"),
+                   {"courses": [], "warnings": []})
+        net_.reply("POST", ("core_course_get_contents", "courseid=9"),
+                   [{"name": "Общее", "modules": []}])
+        data, text = cli.cmd_assigns(config(tmp, "CODE 9 rel-db\n"),
+                                     argparse.Namespace(course="rel-db"))
+        self.assertEqual(data["assignments"], [])
+        self.assertIn("в курсе rel-db заданий нет", text)
+
+    def test_course_title_falls_back_to_code(self):
+        """Название даёт mod_assign; у курса, которого он не вернул, его взять неоткуда."""
+        tmp = tmpdir(self)
+        net_ = FakeNet().install(self)
+        net_.reply("POST", ("mod_assign_get_assignments", "courseids[0]=9"),
+                   {"courses": [], "warnings": []})
+        net_.reply("POST", ("core_course_get_contents", "courseid=9"),
+                   [{"name": "ИДЗ", "modules": [
+                       {"id": 901, "name": "Решение задачи 1 ИДЗ", "modname": "assign",
+                        "uservisible": False, "availabilityinfo": "Нужна группа",
+                        "dates": [{"dataid": "duedate", "timestamp": 1790196900}]}]}])
+        data, text = cli.cmd_assigns(config(tmp, "CODE 9 markov\n"),
+                                     argparse.Namespace(course="markov"))
+        self.assertEqual(data["assignments"][0]["course"]["title"], "markov")
+        self.assertIn("[9] markov", text)
+
     def test_hidden_rows_when_course_known(self):
         """С указанным курсом виден и состав курса: задания, которых mod_assign не отдал,
         печатаются строками с причиной, а не счётчиком «Скрыто ограничением доступа»."""
@@ -291,6 +333,10 @@ class SubmitTest(unittest.TestCase):
         plan, _text, rc = cli.cmd_submit(self.cfg, args)
         self.assertEqual(rc, 1)
         self.assertIn("задание id 115 не найдено", " ".join(plan["problems"]))
+        # форма плана та же, что у обычной отправки: потребитель --json читает те же ключи
+        self.assertEqual((plan["attach"], plan["text_chars"], plan["drafts"], plan["statement"],
+                          plan["files_itemid"], plan["text_file"]),
+                         ([], 0, False, False, None, None))
         self.assertEqual(self.net.calls("mod_assign_get_submission_status"), [])
 
     def test_plan(self):

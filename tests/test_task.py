@@ -101,6 +101,18 @@ class TaskTest(unittest.TestCase):
         self.assertIn("Доклад по теме лекции 1", text)
         self.assertEqual(self.net.calls("mod_assign_get_submission_status"), [])
 
+    def test_contents_failure_is_reported(self):
+        """Состав курса не прочитался: задание из mod_assign находится, но молчать нельзя —
+        иначе «нет задания» по скрытой работе выглядит как ошибка в номере."""
+        self.net.drop("core_course_get_contents")
+        self.net.reply("POST", ("core_course_get_contents", "courseid=1"),
+                       StudyError("moodle", "HTTP 502"))
+        self.net.reply("POST", ("mod_assign_get_submission_status", "assignid=11"),
+                       fixture("submission_status_new"))
+        d = task.build(self.cfg, self.m, self.course, "1")
+        self.assertEqual([e["where"] for e in d["warnings"]], ["состав курса 1"])
+        self.assertIn("Не удалось: moodle · состав курса 1 · HTTP 502", task.render(d))
+
     def test_course_without_assignments(self):
         """У курса, который в ТУИС ничего не принимает, подсказка про study assigns бесполезна."""
         self.net.drop("mod_assign_get_assignments")
