@@ -155,14 +155,16 @@
     "name": "Сдать доклад. Лекция 1",
     "modname": "assign",
     "visible": 1,
-    "uservisible": true,
+    "uservisible": false,
     "dates": [
      {
       "label": "Срок сдачи:",
       "timestamp": 1790024340,
       "dataid": "duedate"
      }
-    ]
+    ],
+    "availabilityinfo": "Недоступно, пока не выполнены условия: Вы принадлежите к группе <strong>НФИбд-01-24</strong>",
+    "description": "<p>Доклад по теме лекции 1, 10 слайдов.</p>"
    }
   ]
  },

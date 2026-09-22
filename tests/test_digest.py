@@ -440,6 +440,15 @@ class CollectorTest(DigestCase):
         self.assertIn("\nНовый курс в ТУИС: Вычислительные методы (id 2) — строка `CODE 2 <папка>` "
                       "или `COURSE_IGNORE` в config.env.", digest.render_digest(d))
 
+    def test_hidden_assign_comes_from_contents(self):
+        """Задание с ограничением доступа mod_assign не отдаёт — сводка берёт его из состава
+        курса: ни assign_id, ни статуса ответа у него нет, только срок и «доступ закрыт»."""
+        _, d = self.collect()
+        a = next(x for x in d["deadlines"] if x["cmid"] == 115)
+        self.assertEqual((a["source"], a["submission"], a.get("assign_id"), a["kind"]),
+                         ("course_contents", "hidden", None, "activity"))
+        self.assertEqual(a["due"]["ts"], 1790024340)
+
     def test_course_without_code_is_reminded(self):
         _, d = self.collect()
         text = digest.render_digest(d)

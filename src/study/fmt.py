@@ -80,6 +80,12 @@ def parse_name(name):
     return None
 
 
+def lab_number(name, work="lab"):
+    """Номер лабы из названия задания (labNN); у домашних и докладов каталога нет."""
+    p = parse_name(name)
+    return p["num"].zfill(2) if p and p["work"] == work else None
+
+
 def short_name(name, tail=True):
     """«Сдать отчет по лабораторной работе № 2. Простые сети» → «ЛР 2 — Простые сети»;
     `tail=False` — только «ЛР 2». Незнакомое имя — как есть, до 60 символов."""

@@ -3,6 +3,7 @@
 Приоритет значений: переменная окружения → строка в config.env → значение по умолчанию.
 Если ключ в config.env встречается дважды, побеждает последнее вхождение.
 """
+import contextlib
 import os
 import pathlib
 import re
@@ -83,6 +84,15 @@ class StudyError(Exception):
     def as_dict(self):
         return {"source": self.source, "where": self.where,
                 "code": self.code, "message": self.message}
+
+
+@contextlib.contextmanager
+def soft(errors, where):
+    """Мягкая ошибка: копится в списке и не роняет сводку, но и не теряется."""
+    try:
+        yield
+    except StudyError as e:
+        errors.append({**e.as_dict(), "where": where})
 
 
 @dataclass

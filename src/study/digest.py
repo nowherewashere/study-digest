@@ -2,12 +2,11 @@
 
 Данные и рендер разделены: `--json` отдаёт ровно то, что видит рендер, без второго обхода API.
 """
-import contextlib
 import time
 
 from . import files, hosting, local, update
-from .config import Course, StudyError
-from .fmt import md_table, moment, parse_name, plain, short_name, weekday
+from .config import Course, StudyError, soft
+from .fmt import lab_number, md_table, moment, plain, short_name, weekday
 from . import moodle as moodle_api
 from .moodle import PENDING, submission_state
 from .snapshot import load_state, save_state
@@ -30,15 +29,6 @@ HOT = 7 * DAY       # «Горит»: несданное, что просроч�
 MONTH = 30 * DAY
 
 
-@contextlib.contextmanager
-def soft(errors, where):
-    """Мягкая ошибка: копится в списке и не роняет сводку, но и не теряется."""
-    try:
-        yield
-    except StudyError as e:
-        errors.append({**e.as_dict(), "where": where})
-
-
 def pending(a):
     """Работа не сдана: ждёт ответа (не начато, черновик, на доработку), статус неизвестен
     или ответа в ТУИС нет вовсе (очно) — в просроченное, но не в «Горит»: слать нечего."""
@@ -49,12 +39,6 @@ def news(course, m, section, what):
     """Строка «Новое в курсах» для модуля курса."""
     return {"course": course, "section": section, "item": m["name"],
             "modname": m.get("modname", ""), "files": [], "what": what}
-
-
-def lab_number(name, work="lab"):
-    """Номер лабы из названия задания (labNN); у домашних и докладов каталога нет."""
-    p = parse_name(name)
-    return p["num"].zfill(2) if p and p["work"] == work else None
 
 
 def by_due(items):
