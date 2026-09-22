@@ -615,6 +615,15 @@ def render(d):
     if trouble:
         out.append("\n" + "; ".join(trouble) + ".")
 
+    # курс без папки: сроки видны, а файлы качать некуда. Строка про новый курс бывает один
+    # раз, поэтому напоминание держится в каждой сводке, пока курс не заведён или не в игноре
+    named = {c["id"] for c in t.get("new_courses", [])}
+    unset = [c for c in t.get("courses", []) if not c["code"] and c["id"] not in named]
+    if unset:
+        out.append("\nБез папки (файлы не скачиваются): "
+                   + ", ".join(f"{c['title']} (id {c['id']})" for c in unset)
+                   + " — строка `CODE <id> <папка>` или `COURSE_IGNORE` в config.env.")
+
     sections = [
         ("Тесты", quiz_rows(t), ["Когда", "Осталось", "Тест", "Курс", "Попытки", "Время"]),
         ("Баллы", grade_rows(t), ["Курс", "Итого", "Новое"]),

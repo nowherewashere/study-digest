@@ -440,6 +440,19 @@ class CollectorTest(DigestCase):
         self.assertIn("\nНовый курс в ТУИС: Вычислительные методы (id 2) — строка `CODE 2 <папка>` "
                       "или `COURSE_IGNORE` в config.env.", digest.render_digest(d))
 
+    def test_course_without_code_is_reminded(self):
+        _, d = self.collect()
+        text = digest.render_digest(d)
+        self.assertEqual(d["new_courses"], [])   # курс 2 давно в снимке, а папки так и нет
+        self.assertIn("\nБез папки (файлы не скачиваются): Вычислительные методы (id 2) — "
+                      "строка `CODE <id> <папка>` или `COURSE_IGNORE` в config.env.", text)
+
+    def test_new_course_is_not_named_twice(self):
+        _, d = self.collect(state={**STATE, "courses": {"1": "Сетевые технологии"}})
+        text = digest.render_digest(d)
+        self.assertIn("Новый курс в ТУИС: Вычислительные методы (id 2)", text)
+        self.assertNotIn("Без папки", text)
+
     def test_first_run(self):
         _, d = self.collect(state={})
         self.assertTrue(d["first_run"])
