@@ -6,7 +6,7 @@ import time
 
 from . import agent, answer, assigns, courses, digest, files, hosting, local, setup, task, update
 from .config import Config, Course, StudyError, soft
-from .fmt import moment, plain, table
+from .fmt import failures, moment, plain, table
 from .moodle import (SUBMISSION, Moodle, accepts, accepts_line, check_state, check_submission,
                      mb, submission_state)
 from .rutube import DEFAULT_CATEGORY, Rutube
@@ -35,7 +35,6 @@ def kv(pairs):
         else:
             out[key] = value
     return out
-
 
 
 def cmd_me(cfg, args):
@@ -102,8 +101,7 @@ def cmd_assigns(cfg, args):
         lines.append(f"\nСкрыто ограничением доступа: {len(reg.warnings)} "
                      "(видно в `study assigns --course <код>` и в сводке)")
     if errors:
-        lines.append("\nНе удалось: " + "; ".join(
-            f"{e['source']} · {e['where']} · {e['message'][:80]}" for e in errors))
+        lines.append("\n" + failures(errors))
     return ({"assignments": rows, "warnings": reg.warnings, "errors": errors},
             "\n".join(lines).lstrip())
 
@@ -183,17 +181,22 @@ def cmd_upload(cfg, args):
     return out, "itemid: {} · загружено: {}".format(itemid, ", ".join(out["files"]))
 
 
-def unknown_assign(args, text, attach):
-    problem = (f"задание id {args.assign_id} не найдено в mod_assign: проверь номер "
-               f"(`study task <код> {args.assign_id}`) — это может быть cmid из сводки "
-               "или задание, закрытое ограничением доступа")
-    plan = {"assign_id": args.assign_id, "name": None, "due": None, "accepts": None,
-            "state": None, "drafts": False, "statement": False,
+def confirm_gate(plan, lines, args, warning):
+    if args.confirm:
+        return None
+    return plan, "\n".join([*lines, "", warning]), 1
+
+
+def make_plan(args, text, attach, found=None, state=None, acc=None, problems=()):
+    return {"assign_id": args.assign_id, "name": found["name"] if found else None,
+            "due": moment(state["due"]) if state else None, "accepts": acc, "state": state,
+            "drafts": bool(found and found.get("submissiondrafts") == 1),
+            "statement": bool(found and found.get("requiresubmissionstatement") == 1),
             "text_file": args.text, "text_chars": len(text or ""),
             "attach": [{"name": p.name, "bytes": p.stat().st_size if p.is_file() else None}
                        for p in attach],
-            "files_itemid": args.files, "problems": [problem], "confirmed": bool(args.confirm)}
-    return plan, "Нельзя отправить:\n  – " + problem, 1
+            "files_itemid": args.files, "problems": list(problems),
+            "confirmed": bool(args.confirm)}
 
 
 def cmd_submit(cfg, args):
@@ -204,20 +207,17 @@ def cmd_submit(cfg, args):
     found = next((a for c in course_list for a in c["assignments"]
                   if a["id"] == args.assign_id), None)
     if found is None:
-        return unknown_assign(args, text, attach)
+        problem = (f"задание id {args.assign_id} не найдено в mod_assign: проверь номер "
+                   f"(`study task <код> {args.assign_id}`) — это может быть cmid из сводки "
+                   "или задание, закрытое ограничением доступа")
+        return (make_plan(args, text, attach, problems=[problem]),
+                "Нельзя отправить:\n  – " + problem, 1)
     acc = accepts(found)
     state = submission_state(found, m.submission_status(args.assign_id), int(time.time()))
     problems = check_submission(acc, text, attach, args.files) + check_state(
         state, lambda ts: moment(ts)["full"])
-    drafts = bool(found and found.get("submissiondrafts") == 1)
-    statement = bool(found and found.get("requiresubmissionstatement") == 1)
-    plan = {"assign_id": args.assign_id, "name": found["name"] if found else None,
-            "due": moment(state["due"]), "accepts": acc, "state": state,
-            "drafts": drafts, "statement": statement,
-            "text_file": args.text, "text_chars": len(text or ""),
-            "attach": [{"name": p.name, "bytes": p.stat().st_size if p.is_file() else None}
-                       for p in attach],
-            "files_itemid": args.files, "problems": problems, "confirmed": bool(args.confirm)}
+    plan = make_plan(args, text, attach, found, state, acc, problems)
+    drafts, statement = plan["drafts"], plan["statement"]
     if attach:
         vl = ", ".join("{} ({})".format(a["name"], mb(a["bytes"]) if a["bytes"] is not None
                                         else "нет") for a in plan["attach"])
@@ -240,9 +240,10 @@ def cmd_submit(cfg, args):
     if problems:
         lines += ["", "Нельзя отправить:"] + [f"  – {x}" for x in problems]
         return plan, "\n".join(lines), 1
-    if not args.confirm:
-        lines += ["", "Отправка необратима: черновика не останется. Повтори с --confirm."]
-        return plan, "\n".join(lines), 1
+    gate = confirm_gate(plan, lines, args,
+                        "Отправка необратима: черновика не останется. Повтори с --confirm.")
+    if gate:
+        return gate
     itemid = m.upload(attach, args.files or 0) if attach else args.files
     plan["files_itemid"] = itemid
     plan["result"] = m.save_submission(args.assign_id, text, itemid)
@@ -251,41 +252,27 @@ def cmd_submit(cfg, args):
     return plan, "Отправлено: {} (id {})".format(plan["name"] or "?", args.assign_id)
 
 
+def pipe(target, call, show):
+    def run(cfg, args):
+        out = call(target(cfg, args), args)
+        return out, show(out, args)
+    return run
+
 
 def client(cfg, args):
     return hosting.HOSTS[args.host](cfg, path=local.find_repo())
 
 
-def cmd_host_releases(cfg, args):
-    rows = client(cfg, args).releases()
-    return rows, table([[r["tag"] or "—", r.get("name") or "", str(r["assets"]),
-                         r.get("status") or ""] for r in rows],
-                       ["тег", "название", "файлов", "статус"]) or "релизов нет"
-
-
-def cmd_host_release(cfg, args):
-    out = client(cfg, args).release(args.tag, args.title, read_text(args.notes), sha=args.sha)
-    return out, "Релиз {} создан: {}".format(out["tag"], out["url"])
-
-
-def cmd_host_update(cfg, args):
-    out = client(cfg, args).update(args.tag, title=args.title, notes=read_text(args.notes))
-    return out, "Релиз {} обновлён: {}".format(out["tag"], out["url"])
-
-
-def cmd_host_asset(cfg, args):
-    out = client(cfg, args).asset(args.release, args.file, args.name)
-    return out, "Загружено: " + out["name"]
-
-
-def cmd_host_api(cfg, args):
-    out = client(cfg, args).api(args.path)
-    return out, json.dumps(out, ensure_ascii=False, indent=1)
-
-
-
 def rt(cfg, args):
     return Rutube(cfg, mode=args.mode)
+
+
+def anon(cfg, args):
+    return Rutube(cfg)
+
+
+def dump(out, args):
+    return json.dumps(out, ensure_ascii=False, indent=1)
 
 
 def videos_table(rows):
@@ -293,63 +280,30 @@ def videos_table(rows):
                   for v in rows], ["id", "название", "", "ссылка"])
 
 
-def cmd_rt_login(cfg, args):
-    out = Rutube(cfg).login(args.email)
-    return out, "Rutube: сохранён token (режим token): " + out["token_file"]
-
-
-def cmd_rt_jwt(cfg, args):
-    out = Rutube(cfg).save_refresh(args.refresh)
-    return out, "Rutube: сохранён refresh_token (режим jwt): " + out["refresh_file"]
-
-
-def cmd_rt_me(cfg, args):
-    rows = rt(cfg, args).me()
-    return rows, videos_table(rows) or "вход работает, видео пока нет"
-
-
-def cmd_rt_api(cfg, args):
-    out = rt(cfg, args).api(args.path)
-    return out, json.dumps(out, ensure_ascii=False, indent=1)
-
-
-def cmd_rt_categories(cfg, args):
-    rows = Rutube(cfg).categories()
-    return rows, table([[str(c["id"]), c["short"] or "", c["name"] or ""] for c in rows],
-                       ["id", "код", "название"])
-
-
-def cmd_rt_video(cfg, args):
-    v = rt(cfg, args).video(args.video_id)
+def video_text(v, args):
     keys = [("id", "id"), ("title", "название"), ("is_hidden", "скрыто"),
             ("video_url", "ссылка"), ("duration", "длительность")]
     cat = (v.get("category") or {}).get("name")
-    return v, "\n".join([f"{label}: {v.get(k)}" for k, label in keys] + [f"категория: {cat}"])
+    return "\n".join([f"{label}: {v.get(k)}" for k, label in keys] + [f"категория: {cat}"])
 
 
-def cmd_rt_edit(cfg, args):
+def edit_video(r, args):
     fields = {"title": args.title, "category": args.category, "age": args.age,
               "description": read_text(args.desc)}
     if args.hidden or args.visible:
         fields["is_hidden"] = not args.visible
-    v = rt(cfg, args).edit(args.video_id, **fields)
-    return v, "готово: " + (v.get("title") or args.video_id)
+    return r.edit(args.video_id, **fields)
 
 
-def cmd_rt_pl_list(cfg, args):
-    rows = rt(cfg, args).playlists()
-    return rows, videos_table(rows) or "плейлистов нет"
-
-
-def cmd_rt_pl_create(cfg, args):
-    p = rt(cfg, args).playlist_create(args.title, args.hidden)
+def playlist_text(p, args):
     text = f"плейлист создан: {p['id']} {p['url'] or ''}".rstrip()
-    return p, text + (f"\nRUTUBE_PLAYLIST={p['url']}" if p["url"] else "")
+    return text + (f"\nRUTUBE_PLAYLIST={p['url']}" if p["url"] else "")
 
 
-def cmd_rt_pl_add(cfg, args):
-    out = rt(cfg, args).playlist_add(args.playlist_id, args.video_id)
-    return out, f"видео {args.video_id} → плейлист {args.playlist_id}"
+def releases_text(rows, args):
+    return table([[r["tag"] or "—", r.get("name") or "", str(r["assets"]),
+                   r.get("status") or ""] for r in rows],
+                 ["тег", "название", "файлов", "статус"]) or "релизов нет"
 
 
 def cmd_rt_upload(cfg, args):
@@ -360,6 +314,7 @@ def cmd_rt_upload(cfg, args):
     age = 0 if args.age is None else args.age
     plan = {"source": args.url or args.file, "title": title, "category": category, "age": age,
             "hidden": args.hidden, "playlist": args.playlist, "confirmed": bool(args.confirm)}
+    lines = []
     if not args.confirm:
         size = f" ({pathlib.Path(args.file).stat().st_size} байт)" if args.file else ""
         lines = ["Что будет загружено на Rutube:",
@@ -367,9 +322,11 @@ def cmd_rt_upload(cfg, args):
                  f"  название: {title or '?'}",
                  f"  категория: {category}   возраст: {age}+",
                  f"  видимость: {'скрыто' if args.hidden else 'публично'}",
-                 f"  плейлист: {args.playlist or 'нет'}",
-                 "", "Загрузка публикует видео в твой аккаунт. Повтори с --confirm."]
-        return plan, "\n".join(lines), 1
+                 f"  плейлист: {args.playlist or 'нет'}"]
+    gate = confirm_gate(plan, lines, args,
+                        "Загрузка публикует видео в твой аккаунт. Повтори с --confirm.")
+    if gate:
+        return gate
     r = rt(cfg, args)
     up = r.upload_url if args.url else r.upload_file
     v = up(args.url or args.file, title=title, description=read_text(args.desc),
@@ -380,7 +337,6 @@ def cmd_rt_upload(cfg, args):
     if args.slot:
         text += f"\nRUTUBE_{args.slot.upper()}={v['url']}"
     return v, text
-
 
 
 def cmd_digest(cfg, args):
@@ -425,15 +381,10 @@ def cmd_update(cfg, args):
     return d, "\n".join(lines)
 
 
-def cmd_setup(cfg, args):
-    return setup.run(cfg)
-
-
 def cmd_agent(cfg, args):
     rows = [agent.install(o) for o in args.operator] if args.operator \
         else [agent.status(o) for o in agent.OPERATORS]
     return rows, agent.render(rows, installed=bool(args.operator))
-
 
 
 JSON = argparse.ArgumentParser(add_help=False)
@@ -477,7 +428,7 @@ def tuis_parsers(sub):
                    help="обновить без вопроса (без терминала — обязателен)")
 
     add(sub, "setup", "первоначальная настройка: токены, каталоги, команда в PATH, оператор, курсы",
-        cmd_setup)
+        lambda cfg, _: setup.run(cfg))
 
     s = add(sub, "agent", "файл инструкций для ИИ-оператора в корне учебной директории", cmd_agent)
     s.add_argument("operator", nargs="*", choices=list(agent.OPERATORS), metavar="оператор",
@@ -543,21 +494,29 @@ def host_parsers(sub):
         h = sub.add_parser(key, help=cls.host + ": релизы и вложения")
         h.set_defaults(host=key)
         hs = h.add_subparsers(dest="hostcmd", required=True, metavar="команда")
-        add(hs, "releases", "список релизов", cmd_host_releases)
-        s = add(hs, "release", "создать релиз", cmd_host_release)
+        add(hs, "releases", "список релизов",
+            pipe(client, lambda c, _: c.releases(), releases_text))
+        s = add(hs, "release", "создать релиз", pipe(
+            client, lambda c, a: c.release(a.tag, a.title, read_text(a.notes), sha=a.sha),
+            lambda o, _: "Релиз {} создан: {}".format(o["tag"], o["url"])))
         s.add_argument("tag")
         s.add_argument("--title", required=True)
         s.add_argument("--notes", required=True, help="файл с описанием")
         s.add_argument("--sha", help="GitVerse: полный SHA; по умолчанию из тега")
-        s = add(hs, "update", "изменить название или описание релиза", cmd_host_update)
+        s = add(hs, "update", "изменить название или описание релиза", pipe(
+            client, lambda c, a: c.update(a.tag, title=a.title, notes=read_text(a.notes)),
+            lambda o, _: "Релиз {} обновлён: {}".format(o["tag"], o["url"])))
         s.add_argument("tag")
         s.add_argument("--title")
         s.add_argument("--notes", help="файл с описанием")
-        s = add(hs, "asset", "загрузить файл в релиз", cmd_host_asset)
+        s = add(hs, "asset", "загрузить файл в релиз", pipe(
+            client, lambda c, a: c.asset(a.release, a.file, a.name),
+            lambda o, _: "Загружено: " + o["name"]))
         s.add_argument("release", help="GitVerse: id релиза, SourceCraft: тег")
         s.add_argument("file")
         s.add_argument("--name", help="имя файла в релизе")
-        s = add(hs, "api", "произвольный запрос", cmd_host_api)
+        s = add(hs, "api", "произвольный запрос",
+                pipe(client, lambda c, a: c.api(a.path), dump))
         s.add_argument("path", help="например /repos/owner/repo/releases")
 
 
@@ -565,18 +524,30 @@ def rt_parsers(sub):
     r = sub.add_parser("rt", help="Rutube: вход и видео")
     rs = r.add_subparsers(dest="rtcmd", required=True, metavar="команда")
     s = add(rs, "login", "режим token: вход по email и паролю (пароль не хранится); "
-            "только для аккаунтов с паролем", cmd_rt_login)
+            "только для аккаунтов с паролем", pipe(
+                anon, lambda r, a: r.login(a.email),
+                lambda o, _: "Rutube: сохранён token (режим token): " + o["token_file"]))
     s.add_argument("--email")
     s = add(rs, "jwt", "режим jwt: сохранить refreshToken из cookie браузера (VK ID / Gazprom ID)",
-            cmd_rt_jwt)
+            pipe(anon, lambda r, a: r.save_refresh(a.refresh),
+                 lambda o, _: "Rutube: сохранён refresh_token (режим jwt): " + o["refresh_file"]))
     s.add_argument("--refresh", help="сам refreshToken или строка cookie; без флага спросит скрыто")
-    add(rs, "me", "проверить вход: мои видео", cmd_rt_me, MODE)
-    s = add(rs, "api", "произвольный GET к rutube.ru/api", cmd_rt_api, MODE)
+    add(rs, "me", "проверить вход: мои видео",
+        pipe(rt, lambda r, _: r.me(),
+             lambda o, _: videos_table(o) or "вход работает, видео пока нет"),
+        MODE)
+    s = add(rs, "api", "произвольный GET к rutube.ru/api",
+            pipe(rt, lambda r, a: r.api(a.path), dump), MODE)
     s.add_argument("path", help="например /video/person/")
-    add(rs, "categories", "список категорий Rutube (id для --category)", cmd_rt_categories)
-    s = add(rs, "video", "метаданные и состояние своего видео", cmd_rt_video, MODE)
+    add(rs, "categories", "список категорий Rutube (id для --category)", pipe(
+        anon, lambda r, _: r.categories(),
+        lambda o, _: table([[str(c["id"]), c["short"] or "", c["name"] or ""] for c in o],
+                           ["id", "код", "название"])))
+    s = add(rs, "video", "метаданные и состояние своего видео",
+            pipe(rt, lambda r, a: r.video(a.video_id), video_text), MODE)
     s.add_argument("video_id")
-    s = add(rs, "edit", "правка названия/описания/категории/видимости", cmd_rt_edit, MODE)
+    s = add(rs, "edit", "правка названия/описания/категории/видимости", pipe(
+        rt, edit_video, lambda o, a: "готово: " + (o.get("title") or a.video_id)), MODE)
     s.add_argument("video_id")
     s.add_argument("--title")
     s.add_argument("--desc", help="файл с описанием")
@@ -587,11 +558,15 @@ def rt_parsers(sub):
 
     p = rs.add_parser("playlist", help="плейлисты: list/create/add")
     ps = p.add_subparsers(dest="plcmd", required=True, metavar="действие")
-    add(ps, "list", "свои плейлисты", cmd_rt_pl_list, MODE)
-    s = add(ps, "create", "создать плейлист", cmd_rt_pl_create, MODE)
+    add(ps, "list", "свои плейлисты", pipe(
+        rt, lambda r, _: r.playlists(), lambda o, _: videos_table(o) or "плейлистов нет"), MODE)
+    s = add(ps, "create", "создать плейлист", pipe(
+        rt, lambda r, a: r.playlist_create(a.title, a.hidden), playlist_text), MODE)
     s.add_argument("--title", required=True)
     s.add_argument("--hidden", action="store_true", help="скрытый плейлист")
-    s = add(ps, "add", "добавить видео в плейлист", cmd_rt_pl_add, MODE)
+    s = add(ps, "add", "добавить видео в плейлист", pipe(
+        rt, lambda r, a: r.playlist_add(a.playlist_id, a.video_id),
+        lambda _, a: f"видео {a.video_id} → плейлист {a.playlist_id}"), MODE)
     s.add_argument("playlist_id")
     s.add_argument("video_id")
 

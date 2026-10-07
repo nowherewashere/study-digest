@@ -30,11 +30,11 @@ FLOW_NOTE = {"release": "релиз репозитория со скринкас
              "file": "файлом (`study submit <id> --attach`)"}
 
 
-def notes_stub(code, cid, title=None, flow=None):
+def scaffold(code, cid, title=None, flow=None):
+    (ROOT / code / "stash").mkdir(parents=True, exist_ok=True)
     p = ROOT / code / "NOTES.md"
     if p.exists():
         return None
-    p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(NOTES.format(title=title or code, cid=cid, code=code,
                               flow=FLOW_NOTE.get(flow, "не задано (FLOW в config.env)")),
                  encoding="utf-8")
@@ -124,7 +124,6 @@ def setup(cfg, rows_):
     titles = {r["id"]: r["title"] for r in rows_}
     notes = []
     for cid, code in codes.items():
-        (ROOT / code / "stash").mkdir(parents=True, exist_ok=True)
-        if notes_stub(code, cid, titles.get(cid), flows[cid]):
+        if scaffold(code, cid, titles.get(cid), flows[cid]):
             notes.append(code)
     return {"ignore": sorted(ignore_ids), "code": codes, "flow": flows, "notes": notes}

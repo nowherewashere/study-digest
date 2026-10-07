@@ -3,18 +3,14 @@ import unittest
 
 from study import cli, fmt, net
 from study.config import StudyError
-from study.moodle import (PAGE, Moodle, accepts, accepts_line, check_state, check_submission,
+from study.moodle import (PAGE, accepts, accepts_line, check_state, check_submission,
                           grade_of, submission_state)
-from tests.fakes import FakeNet, config, fixture, tmpdir
+from tests.fakes import FakeNet, MoodleCase, config, fixture, tmpdir
 
 SERVER = "https://tuis.example/webservice/rest/server.php"
 
 
-class MoodleTest(unittest.TestCase):
-    def setUp(self):
-        self.tmp = tmpdir(self)
-        self.net = FakeNet().install(self)
-        self.m = Moodle(config(self.tmp))
+class MoodleTest(MoodleCase):
 
     def test_call_form(self):
         self.net.reply("POST", "mod_quiz_get_quizzes_by_courses", {"quizzes": []})
@@ -291,11 +287,9 @@ class AssignsTest(unittest.TestCase):
         self.assertNotIn("Скрыто ограничением доступа", text)
 
 
-class SubmitTest(unittest.TestCase):
+class SubmitTest(MoodleCase):
     def setUp(self):
-        self.tmp = tmpdir(self)
-        self.net = FakeNet().install(self)
-        self.cfg = config(self.tmp)
+        super().setUp()
         self.pdf = self.tmp / "report.pdf"
         self.pdf.write_bytes(b"%PDF" * 300)
 

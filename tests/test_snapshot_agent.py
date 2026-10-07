@@ -1,12 +1,10 @@
 import json
-import pathlib
-import tempfile
 import time
 import unittest
 
 from study import agent, snapshot, update
 from study.config import Config, StudyError
-from tests.fakes import tmpdir
+from tests.fakes import at_root, patch, tmpdir
 
 
 class SnapshotTest(unittest.TestCase):
@@ -66,14 +64,11 @@ class SnapshotTest(unittest.TestCase):
 
 class AgentTest(unittest.TestCase):
     def setUp(self):
-        self.root = pathlib.Path(tempfile.mkdtemp())
+        self.root = tmpdir(self)
         self.src = self.root / "AGENTS.src.md"
         self.src.write_text("# Инструкция\n\nтекст v1\n", encoding="utf-8")
-        self._saved = agent.ROOT, agent.SOURCE
-        agent.ROOT, agent.SOURCE = self.root, self.src
-
-    def tearDown(self):
-        agent.ROOT, agent.SOURCE = self._saved
+        at_root(self, self.root, agent)
+        patch(self, agent, "SOURCE", self.src)
 
     def test_new_append_stale_idempotent(self):
         r = agent.install("copilot")

@@ -1,11 +1,11 @@
-import re
-from contextlib import nullcontext
+import contextlib
 from dataclasses import dataclass, field
 from typing import Optional
 
 from . import moodle as moodle_api
 from .config import Course, StudyError
 from .fmt import lab_number, moment, parse_name, plain, short_name
+from .local import lab_id
 
 DATE_IDS = {"duedate", "timeclose"}
 OPEN_IDS = {"allowsubmissionsfromdate", "timeopen"}
@@ -95,32 +95,30 @@ class Registry:
         self._contents = contents or moodle.contents
         self.warnings = []
         self._soft = soft
-        self._api = None
-        self._titles = {}
+        self._loaded = None
         self._works = {}
         self._sections = {}
 
     def guard(self, where):
-        return self._soft(where) if self._soft else nullcontext()
+        return self._soft(where) if self._soft else contextlib.nullcontext()
 
     def _load(self):
-        if self._api is None:
+        if self._loaded is None:
             courses, self.warnings = self.moodle.assignments(self.courseids)
-            self._api = {c["id"]: c.get("assignments") or [] for c in courses}
-            self._titles = {c["id"]: c.get("fullname") or "" for c in courses}
+            self._loaded = {c["id"]: c for c in courses}
+        return self._loaded
 
     def api(self, course_id):
-        self._load()
-        return self._api.get(course_id, [])
+        return self._load().get(course_id, {}).get("assignments") or []
 
     def title(self, course_id):
-        self._load()
-        return self._titles.get(course_id)
+        c = self._load().get(course_id)
+        return (c.get("fullname") or "") if c else None
 
     def courses(self, codes=None):
         self._load()
         codes = codes or {}
-        return [Course(cid, codes.get(cid), title) for cid, title in self._titles.items()]
+        return [Course(cid, codes.get(cid), self.title(cid)) for cid in self._load()]
 
     def sections(self, course):
         if course.id not in self._sections:
@@ -152,22 +150,15 @@ class Registry:
         if not works:
             raise StudyError("moodle", f"в курсе {label} заданий нет: "
                                        "ТУИС по этому курсу ничего не принимает")
-        m = re.fullmatch(r"(?:lab)?(\d{1,2})", what.strip().lower())
-        if m:
-            num = m.group(1).zfill(2)
-            for w in works:
-                if w.lab == num:
-                    return w
-            for w in works:
-                if w.num == num:
-                    return w
-        if what.strip().isdigit():
-            n = int(what)
-            for w in works:
-                if w.assign_id == n:
-                    return w
-            for w in works:
-                if w.cmid == n:
-                    return w
+        what = what.strip().lower()
+        keys = []
+        with contextlib.suppress(StudyError):
+            num = lab_id(what)
+            keys += [lambda w: w.lab == num, lambda w: w.num == num]
+        if what.isdigit():
+            keys += [lambda w: w.assign_id == int(what), lambda w: w.cmid == int(what)]
+        found = next((w for key in keys for w in works if key(w)), None)
+        if found:
+            return found
         raise StudyError("moodle", f"в курсе {label} нет задания «{what}»: "
                                    f"study assigns --course {label}")

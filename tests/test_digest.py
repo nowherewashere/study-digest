@@ -7,7 +7,7 @@ from study import config as studyconfig
 from study import digest, files, local, update
 from study.config import Course, StudyError
 from study.moodle import Moodle
-from tests.fakes import DAY, NOW, FakeNet, config, fixture, patch, repo, tmpdir
+from tests.fakes import DAY, NOW, FakeNet, at_root, config, fixture, patch, repo, tmpdir
 
 DUE = {-5: 1789160340, -3: 1789333140, -2: 1789419540, 1: 1789678740, 3: 1789851540,
        8: 1790283540, 10: 1790456340}
@@ -233,7 +233,7 @@ class CollectorTest(DigestCase):
                                         f"since={since}"), {"instances": [], "warnings": []})
             return digest.collect(self.cfg, Moodle(self.cfg))
 
-        patch(self, files, "ROOT", self.tmp)
+        at_root(self, self.tmp, files)
         old = {"type": "file", "filename": "task-2.pdf", "filesize": 1000, "timemodified": 1.6e9,
                "fileurl": "https://tuis.example/webservice/pluginfile.php/10/mod_resource/"
                           "content/1/task-2.pdf?forcedownload=1"}
@@ -497,8 +497,7 @@ class StateTest(DigestCase):
 
     def setUp(self):
         super().setUp()
-        for mod in (local, files, studyconfig):
-            patch(self, mod, "ROOT", self.tmp)
+        at_root(self, self.tmp, local, files, studyconfig)
         patch(self, update, "check", lambda: None)
         self.repo = repo(self.tmp / "nettech" / "course",
                          {"origin": "ssh://git@gitverse.ru:2222/me/nettech.git",

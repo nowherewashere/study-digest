@@ -5,11 +5,13 @@ import re
 import shutil
 import subprocess
 import tempfile
+import unittest
 import urllib.parse
 from unittest import mock
 
 from study import net
-from study.config import Config
+from study.config import Config, Course
+from study.moodle import Moodle
 
 FIXTURES = pathlib.Path(__file__).parent / "fixtures"
 NOW = 1789538400
@@ -61,6 +63,27 @@ def config(tmp, extra=""):
                  f"RUTUBE_ACCESS_FILE={tmp / 'rt-access'}\n" + extra, encoding="utf-8")
     return Config(p)
 
+
+def at_root(case, tmp, *mods):
+    for mod in mods:
+        patch(case, mod, "ROOT", tmp)
+
+
+def home(case, tmp):
+    os.environ["HOME"] = os.environ["USERPROFILE"] = str(tmp)
+
+
+class MoodleCase(unittest.TestCase):
+    EXTRA = ""
+    ROOTS = ()
+
+    def setUp(self):
+        self.tmp = tmpdir(self)
+        at_root(self, self.tmp, *self.ROOTS)
+        self.net = FakeNet().install(self)
+        self.cfg = config(self.tmp, self.EXTRA)
+        self.m = Moodle(self.cfg)
+        self.course = Course(1, "nettech", "Сетевые технологии")
 
 
 GIT = ["git", "-c", "user.name=study", "-c", "user.email=study@example.org",

@@ -4,20 +4,17 @@ import unittest
 
 from study import answer, files, local
 from study.config import Course, StudyError
-from study.moodle import Moodle
-from tests.fakes import DAY, NOW, FakeNet, config, fixture, git, patch, repo, tmpdir
+from tests.fakes import DAY, NOW, MoodleCase, at_root, config, fixture, git, repo, tmpdir
 
 SINCE = NOW - DAY
 
 
-class FilesTest(unittest.TestCase):
+class FilesTest(MoodleCase):
+    EXTRA = "CODE 1 nettech\n"
+    ROOTS = (files,)
+
     def setUp(self):
-        self.tmp = tmpdir(self)
-        self.net = FakeNet().install(self)
-        patch(self, files, "ROOT", self.tmp)
-        self.cfg = config(self.tmp, "CODE 1 nettech\n")
-        self.m = Moodle(self.cfg)
-        self.course = Course(1, "nettech", "Сетевые технологии")
+        super().setUp()
         self.stash = self.tmp / "nettech" / "stash"
         self.net.reply("POST", ("core_course_get_contents", "courseid=1"),
                        fixture("course_contents"))
@@ -137,8 +134,7 @@ class SafeNameTest(unittest.TestCase):
 class AnswerTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tmpdir(self)
-        for mod in (local, answer):
-            patch(self, mod, "ROOT", self.tmp)
+        at_root(self, self.tmp, local, answer)
         self.cfg = config(self.tmp, "GV_REPO=cfg/gv\nSC_REPO=cfg/sc\n")
         self.repo = repo(self.tmp / "nettech" / "2026-study-nettech",
                          {"origin": "ssh://git@gitverse.ru:2222/me/nettech.git",

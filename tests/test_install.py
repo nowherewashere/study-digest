@@ -11,7 +11,7 @@ import sys
 import unittest
 from unittest import mock
 
-from tests.fakes import git, patch, repo, tmpdir
+from tests.fakes import git, home, patch, repo, tmpdir
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -26,7 +26,7 @@ def load():
 class InstallTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tmpdir(self)
-        os.environ["HOME"] = os.environ["USERPROFILE"] = str(self.tmp)
+        home(self, self.tmp)
         self.upstream = repo(self.tmp / "upstream")
         for rel in ("study", "src/study/__init__.py", "src/study/setup.py"):
             (self.upstream / rel).parent.mkdir(parents=True, exist_ok=True)

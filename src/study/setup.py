@@ -237,8 +237,7 @@ def dirs(s, cfg):
     codes = cfg.codes()
     titles = load_state(cfg).get("courses") or {}
     for cid, code in codes.items():
-        (ROOT / code / "stash").mkdir(parents=True, exist_ok=True)
-        made = courses.notes_stub(code, cid, titles.get(str(cid)), local.flow_of(cfg, code))
+        made = courses.scaffold(code, cid, titles.get(str(cid)), local.flow_of(cfg, code))
         s.ok(f"{ROOT / code}{os.sep}{{stash" + (",NOTES.md}" if made else "}"))
     if not codes:
         s.note("папки курсов появятся на шаге «Курсы»")

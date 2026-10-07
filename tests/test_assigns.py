@@ -2,17 +2,11 @@ import unittest
 
 from study import assigns
 from study.config import Course, StudyError, soft
-from study.moodle import Moodle
-from tests.fakes import FakeNet, config, fixture, tmpdir
+from tests.fakes import MoodleCase, fixture
 
 
-class RegistryTest(unittest.TestCase):
-    def setUp(self):
-        self.tmp = tmpdir(self)
-        self.net = FakeNet().install(self)
-        self.cfg = config(self.tmp, "CODE 1 nettech\n")
-        self.m = Moodle(self.cfg)
-        self.course = Course(1, "nettech", "Сетевые технологии")
+class RegistryTest(MoodleCase):
+    EXTRA = "CODE 1 nettech\n"
 
     def both(self):
         self.net.reply("POST", ("mod_assign_get_assignments", "courseids[0]=1"),

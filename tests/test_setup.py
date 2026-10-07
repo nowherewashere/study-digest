@@ -11,7 +11,7 @@ from unittest import mock
 
 from study import agent, courses, files, local, setup
 from study.config import Config
-from tests.fakes import NOW, FakeNet, fixture, patch, tmpdir
+from tests.fakes import NOW, FakeNet, at_root, fixture, home, patch, tmpdir
 
 INVALID = {"exception": "moodle_exception", "errorcode": "invalidtoken", "message": "Invalid token"}
 
@@ -19,15 +19,14 @@ INVALID = {"exception": "moodle_exception", "errorcode": "invalidtoken", "messag
 class SetupCase(unittest.TestCase):
     def setUp(self):
         self.tmp = tmpdir(self)
-        os.environ["HOME"] = os.environ["USERPROFILE"] = str(self.tmp)
+        home(self, self.tmp)
         self.root = self.tmp / "study"
         self.here = self.root / ".digest"
         (self.here / "docs").mkdir(parents=True)
         (self.here / "study").write_text("#!/usr/bin/env python3\n", encoding="utf-8")
         (self.here / "docs" / "AGENTS.md").write_text("# Инструкция\n", encoding="utf-8")
         (self.here / "config.env.example").write_text("# пример\nTUIS_TOKEN=\n", encoding="utf-8")
-        for mod in (setup, agent, courses, files, local):
-            patch(self, mod, "ROOT", self.root)
+        at_root(self, self.root, setup, agent, courses, files, local)
         patch(self, setup, "HERE", self.here)
         patch(self, agent, "SOURCE", self.here / "docs" / "AGENTS.md")
         patch(self, time, "time", lambda: NOW)
@@ -274,7 +273,7 @@ class ScreenTest(unittest.TestCase):
 class LinkTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tmpdir(self)
-        os.environ["HOME"] = os.environ["USERPROFILE"] = str(self.tmp)
+        home(self, self.tmp)
         self.here = self.tmp / "study" / ".digest"
         self.here.mkdir(parents=True)
         (self.here / "study").write_text("", encoding="utf-8")
@@ -342,8 +341,8 @@ class LinkTest(unittest.TestCase):
 class NotesStubTest(unittest.TestCase):
     def test_stub_once(self):
         root = tmpdir(self)
-        patch(self, courses, "ROOT", root)
-        p = courses.notes_stub("nettech", 1, "Сетевые технологии", "release")
+        at_root(self, root, courses)
+        p = courses.scaffold("nettech", 1, "Сетевые технологии", "release")
         self.assertEqual(p, root / "nettech" / "NOTES.md")
         text = p.read_text(encoding="utf-8")
         self.assertIn("# Сетевые технологии — заметки\n\nКурс в ТУИС: `1` «Сетевые технологии». "
@@ -351,12 +350,12 @@ class NotesStubTest(unittest.TestCase):
         self.assertIn("`study files nettech --pull`", text)
         for head in ("## Задания и сроки", "## Ключевые находки", "## Лабы"):
             self.assertIn(head, text)
-        self.assertIsNone(courses.notes_stub("nettech", 1, "Другое"))
+        self.assertIsNone(courses.scaffold("nettech", 1, "Другое"))
         self.assertEqual(p.read_text(encoding="utf-8"), text)
         (root / "bpm").mkdir()
         (root / "bpm" / "NOTES.md").write_text("# Моё\n", encoding="utf-8")
-        self.assertIsNone(courses.notes_stub("bpm", 5))
+        self.assertIsNone(courses.scaffold("bpm", 5))
         self.assertEqual((root / "bpm" / "NOTES.md").read_text(encoding="utf-8"), "# Моё\n")
-        text = courses.notes_stub("x", 9).read_text(encoding="utf-8")
+        text = courses.scaffold("x", 9).read_text(encoding="utf-8")
         self.assertTrue(text.startswith("# x — заметки"))
         self.assertIn("Сдача: не задано (FLOW в config.env)", text)

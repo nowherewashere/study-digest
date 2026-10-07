@@ -5,6 +5,10 @@ from . import local, net
 from .config import StudyError
 
 
+def compact(pairs):
+    return {k: v for k, v in pairs if v}
+
+
 class Hosting:
 
     key = ""
@@ -15,6 +19,10 @@ class Hosting:
     host = ""
     web = ""
     base = ""
+    extra_headers = ()
+    asset_field = "file"
+    bad_ext = ()
+    part_named = True
 
     def __init__(self, cfg, path=None, repo=None):
         self.cfg = cfg
@@ -27,7 +35,8 @@ class Hosting:
                              f"(remote {self.remote}) или {self.repo_key} в config.env")
 
     def headers(self):
-        return {"Authorization": "Bearer " + self.cfg.token(self.token_key)}
+        auth = "Bearer " + self.cfg.token(self.token_key)
+        return {"Authorization": auth, **dict(self.extra_headers)}
 
     def api(self, path, **kw):
         kw.setdefault("headers", {}).update(self.headers())
@@ -36,11 +45,17 @@ class Hosting:
     def repo_url(self):
         return f"{self.web}/{self.repo}"
 
-    @staticmethod
-    def _file(path):
+    def asset(self, target, path, name=None):
         p = pathlib.Path(path)
+        name = name or p.name
+        if name.endswith(self.bad_ext):
+            raise StudyError(self.source, f"{name}: {self.source} не принимает "
+                                          f"{' и '.join(self.bad_ext)} — класть .md или zip")
         ctype = mimetypes.guess_type(p.name)[0] or "application/octet-stream"
-        return p.name, p.read_bytes(), ctype
+        part = (self.part_named and name) or p.name
+        self.api(self.asset_path(target, name),
+                 files=[(self.asset_field, part, p.read_bytes(), ctype)], timeout=900)
+        return {"name": name, "ok": True}
 
 
 class GitVerse(Hosting):
@@ -53,10 +68,13 @@ class GitVerse(Hosting):
     web = "https://gitverse.ru"
     base = "https://api.gitverse.ru"
 
-    def headers(self):
-        head = super().headers()
-        head["Accept"] = "application/vnd.gitverse.object+json;version=1"
-        return head
+    extra_headers = (("Accept", "application/vnd.gitverse.object+json;version=1"),)
+    asset_field = "attachment"
+    part_named = False
+    bad_ext = (".qmd", ".html")
+
+    def asset_path(self, release_id, name):
+        return f"/repos/{self.repo}/releases/{release_id}/assets?name={name}"
 
     def releases(self):
         out = self.api(f"/repos/{self.repo}/releases", retries=net.RETRIES) or []
@@ -78,19 +96,9 @@ class GitVerse(Hosting):
         ids = {r["tag"]: r["id"] for r in self.releases()}
         if tag not in ids:
             raise StudyError(self.source, f"релиза {tag} нет")
-        body = {k: v for k, v in (("name", title), ("body", notes)) if v}
+        body = compact((("name", title), ("body", notes)))
         self.api(f"/repos/{self.repo}/releases/{ids[tag]}", method="PATCH", json_body=body)
         return {"id": ids[tag], "tag": tag, "url": self.web_url(tag)}
-
-    def asset(self, release_id, path, name=None):
-        fname, data, ctype = self._file(path)
-        name = name or fname
-        if name.endswith((".qmd", ".html")):
-            raise StudyError(self.source, f"{name}: GitVerse не принимает .qmd и .html — "
-                                          "класть .md или zip")
-        self.api(f"/repos/{self.repo}/releases/{release_id}/assets?name={name}",
-                 files=[("attachment", fname, data, ctype)], timeout=900)
-        return {"name": name, "ok": True}
 
     def web_url(self, tag):
         return f"{self.repo_url()}/releases/tag/{tag}"
@@ -128,15 +136,12 @@ class SourceCraft(Hosting):
 
     def update(self, tag, title=None, notes=None):
         fields = (("title", title), ("release_notes", notes and self.localize(notes)))
-        body = {k: v for k, v in fields if v}
+        body = compact(fields)
         self.api(f"/repos/{self.repo}/releases/tag/{tag}", method="PATCH", json_body=body)
         return {"tag": tag, "url": self.web_url(tag)}
 
-    def asset(self, tag, path, name=None):
-        fname, data, ctype = self._file(path)
-        self.api(f"/repos/{self.repo}/releases/tag/{tag}/attachments",
-                 files=[("file", name or fname, data, ctype)], timeout=900)
-        return {"name": name or fname, "ok": True}
+    def asset_path(self, tag, _name):
+        return f"/repos/{self.repo}/releases/tag/{tag}/attachments"
 
     def web_url(self, tag):
         return f"{self.repo_url()}/releases/{tag}"

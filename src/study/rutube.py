@@ -1,13 +1,12 @@
 import base64
 import getpass
 import json
-import os
 import pathlib
 import time
 import uuid
 
 from . import net
-from .config import StudyError
+from .config import StudyError, write_atomic
 
 BASE = "https://rutube.ru/api"
 REFRESH_URL = "https://rutube.ru/multipass/api/v3/accounts/token/"
@@ -21,6 +20,14 @@ ACCESS_MARGIN = 120
 
 def _obj(out):
     return out if isinstance(out, dict) else {}
+
+
+def _save(path, value):
+    write_atomic(path, value + "\n", 0o600, 0o700)
+
+
+def _pick(row, **keys):
+    return {name: row.get(src) for name, src in keys.items()}
 
 
 def _extract_refresh(s):
@@ -38,26 +45,10 @@ class Rutube:
     def __init__(self, cfg, mode="auto"):
         self.cfg = cfg
         self.mode = mode
+        self._token_file = cfg.path_of("RUTUBE_TOKEN_FILE")
+        self._refresh_file = cfg.path_of("RUTUBE_REFRESH_FILE")
+        self._access_file = cfg.path_of("RUTUBE_ACCESS_FILE")
         self._access = None
-
-    def _token_path(self):
-        return self.cfg.path_of("RUTUBE_TOKEN_FILE")
-
-    def _refresh_path(self):
-        return self.cfg.path_of("RUTUBE_REFRESH_FILE")
-
-    def _access_path(self):
-        return self.cfg.path_of("RUTUBE_ACCESS_FILE")
-
-    @staticmethod
-    def _save(path, value):
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_name(path.name + ".tmp")
-        tmp.write_text(value + "\n", encoding="utf-8")
-        if os.name == "posix":
-            path.parent.chmod(0o700)
-            tmp.chmod(0o600)
-        tmp.replace(path)
 
     @staticmethod
     def _jwt_payload(token):
@@ -68,7 +59,6 @@ class Rutube:
             return {}
         return data if isinstance(data, dict) else {}
 
-
     def login(self, email=None, password=None):
         email = email or input("Rutube email: ").strip()
         password = password or getpass.getpass("Rutube пароль: ")
@@ -78,8 +68,8 @@ class Rutube:
         token = out.get("token")
         if not token:
             raise StudyError(self.source, f"токен не получен: {out}", code="auth")
-        self._save(self._token_path(), token)
-        return {"token_file": str(self._token_path()), "ok": True}
+        _save(self._token_file, token)
+        return {"token_file": str(self._token_file), "ok": True}
 
     def save_refresh(self, refresh=None):
         if refresh is None:
@@ -88,11 +78,10 @@ class Rutube:
         if not refresh:
             raise StudyError(self.source, "не нашёл refreshToken", code="auth")
         access, new = self._refresh_call(refresh)
-        self._save(self._refresh_path(), new or refresh)
-        self._save(self._access_path(), access)
+        _save(self._refresh_file, new or refresh)
+        _save(self._access_file, access)
         self._access = access
-        return {"refresh_file": str(self._refresh_path()), "ok": True}
-
+        return {"refresh_file": str(self._refresh_file), "ok": True}
 
     def _refresh_call(self, token):
         out = _obj(net.request(REFRESH_URL, self.source, method="POST",
@@ -106,41 +95,41 @@ class Rutube:
     def _mint(self):
         if self._access:
             return self._access
-        af = self._access_path()
+        af = self._access_file
         if af.exists():
             cached = af.read_text(encoding="utf-8").strip()
             if cached and self._jwt_payload(cached).get("exp", 0) - time.time() > ACCESS_MARGIN:
                 self._access = cached
                 return cached
-        rf = self._refresh_path()
+        rf = self._refresh_file
         if not rf.exists():
             raise StudyError(self.source, f"нет файла {rf}", code="notoken")
         refresh = rf.read_text(encoding="utf-8").strip()
         access, new = self._refresh_call(refresh)
         if new and new != refresh:
-            self._save(rf, new)
-        self._save(af, access)
+            _save(rf, new)
+        _save(af, access)
         self._access = access
         return access
 
     def _auth_header(self):
         mode = self.mode
         if mode == "auto":
-            if self._refresh_path().exists():
+            if self._refresh_file.exists():
                 mode = "jwt"
-            elif self._token_path().exists():
+            elif self._token_file.exists():
                 mode = "token"
             else:
-                raise StudyError(self.source, f"нет ни {self._refresh_path()}, ни "
-                                 f"{self._token_path()} — см. rt login или rt jwt", code="notoken")
+                raise StudyError(self.source, f"нет ни {self._refresh_file}, ни "
+                                 f"{self._token_file} — см. rt login или rt jwt", code="notoken")
         if mode == "jwt":
             return {"Authorization": "Bearer " + self._mint()}
         if mode == "token":
             return {"Authorization": "Token " + self.cfg.token("RUTUBE_TOKEN")}
         raise StudyError(self.source, f"неизвестный режим {mode}", code="config")
 
-    def api(self, path, **kw):
-        head = self._auth_header()
+    def api(self, path, auth=True, **kw):
+        head = self._auth_header() if auth else {}
         head.update(kw.pop("headers", None) or {})
         return net.request(BASE + path, self.source, headers=head, where=path, **kw)
 
@@ -149,14 +138,12 @@ class Rutube:
 
     def me(self):
         rows = self._json("/video/person/?limit=5").get("results", [])
-        return [{"id": v.get("id"), "title": v.get("title"), "url": v.get("video_url"),
-                 "hidden": v.get("is_hidden")} for v in rows]
-
+        return [_pick(v, id="id", title="title", url="video_url", hidden="is_hidden")
+                for v in rows]
 
     def categories(self):
-        rows = net.request(BASE + "/video/category/", self.source, where="video/category") or []
-        return [{"id": c.get("id"), "short": c.get("short_name"), "name": c.get("name")}
-                for c in rows]
+        rows = self.api("/video/category/", auth=False) or []
+        return [_pick(c, id="id", short="short_name", name="name") for c in rows]
 
     @staticmethod
     def video_url(vid):
@@ -187,8 +174,8 @@ class Rutube:
 
     def playlists(self):
         rows = self._json(f"/playlist/user/{self._channel_id()}/").get("results", [])
-        return [{"id": p.get("id"), "title": p.get("title"), "url": self.playlist_url(p.get("id")),
-                 "count": p.get("videos_count"), "hidden": p.get("is_hidden")} for p in rows]
+        return [{**_pick(p, id="id", title="title", count="videos_count", hidden="is_hidden"),
+                 "url": self.playlist_url(p.get("id"))} for p in rows]
 
     def playlist_create(self, title, hidden=False):
         out = self._json("/playlist/custom/", method="POST",
@@ -200,7 +187,6 @@ class Rutube:
     def playlist_add(self, pid, vid):
         return self._json(f"/playlist/custom/update/{vid}/", method="POST",
                           json_body={"include": [int(pid)], "exclude": []})
-
 
     def progress(self, vid):
         return self._json(f"/uploader/{vid}/progress/")

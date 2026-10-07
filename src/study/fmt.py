@@ -102,3 +102,8 @@ def table(rows, headers=None):
         if headers and i == 0:
             out.append("  ".join("-" * w for w in widths))
     return "\n".join(out)
+
+
+def failures(errors):
+    return "Не удалось: " + "; ".join(
+        f"{e['source']} · {e['where']} · {e['message'][:80]}" for e in errors)

@@ -4,7 +4,7 @@ import time
 from . import local
 from .assigns import SUBMISSION, Registry
 from .config import ROOT, soft
-from .fmt import moment, plain
+from .fmt import failures, moment, plain
 from .moodle import PENDING, accepts, accepts_line, submission_state
 
 
@@ -115,6 +115,5 @@ def render(d):
     for f in d["attachments"]:
         out.append(f"Вложение задания: {f['name']} — {f['url']}")
     if d["warnings"]:
-        out.append("Не удалось: " + "; ".join(
-            f"{w['source']} · {w['where']} · {w['message'][:80]}" for w in d["warnings"]))
+        out.append(failures(d["warnings"]))
     return "\n".join(out) + "\n\n" + (d["intro"] or "(текста задания нет)")

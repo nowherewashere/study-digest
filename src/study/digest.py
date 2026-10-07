@@ -3,7 +3,7 @@ import time
 from . import files, hosting, local, update
 from .assigns import KINDS, SUBMISSION, Registry
 from .config import Course, StudyError, soft
-from .fmt import md_table, moment, plain, short_name, weekday
+from .fmt import failures, md_table, moment, plain, short_name, weekday
 from .moodle import PENDING, submission_state
 from .snapshot import load_state, save_state
 
@@ -544,8 +544,7 @@ def render(d):
     if hot:
         out += ["\n## Горит\n"] + [hot_line(a) for a in hot]
     if d.get("errors"):
-        out.append("\nНе удалось: " + "; ".join(
-            f"{e['source']} · {e['where']} · {e['message'][:80]}" for e in d["errors"]) + ".")
+        out.append("\n" + failures(d["errors"]) + ".")
     hints = update.note(d.get("update"))
     if hints:
         out.append("\n" + "\n".join(hints))

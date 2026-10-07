@@ -28,19 +28,19 @@ def run(path, *args, timeout=None):
 
 def git(path, *args, check=False, timeout=None):
     r = run(path, *args, timeout=timeout)
-    if r is None:
-        if check:
-            raise StudyError("git", f"нет ответа за {timeout} с", where=" ".join(args))
+    where = " ".join(args)
+    if r is None and check:
+        raise StudyError("git", f"нет ответа за {timeout} с", where=where)
+    if r is None or r.returncode:
+        if r and check:
+            raise StudyError("git", (r.stderr or r.stdout).strip() or "ошибка", where=where)
         return ""
-    if r.returncode and check:
-        raise StudyError("git", (r.stderr or r.stdout).strip() or "ошибка", where=" ".join(args))
-    return r.stdout.strip() if not r.returncode else ""
+    return r.stdout.strip()
 
 
 def repo_slug(url):
-    s = re.sub(r"^[a-z]+://([^@/]+@)?[^/]+/", "", url or "")
-    s = re.sub(r"^[^/@]+@[^:]+:", "", s)
-    return re.sub(r"\.git$", "", s)
+    return re.sub(r"\.git$", "", re.sub(
+        r"^(?:[a-z]+://(?:[^@/]+@)?[^/]+/|[^/@]+@[^:]+:)", "", url or ""))
 
 
 def repo_from_remote(path, remote, host=None):

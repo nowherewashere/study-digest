@@ -39,12 +39,26 @@ def key(module, content):
     return f"{module.get('id')}/{content.get('filename')}"
 
 
+def kind(content):
+    return content.get("type") if content.get("fileurl") else None
+
+
 def is_file(content):
-    return content.get("type") == "file" and bool(content.get("fileurl"))
+    return kind(content) == "file"
 
 
 def is_link(content):
-    return content.get("type") == "url" and bool(content.get("fileurl"))
+    return kind(content) == "url"
+
+
+def skip_reason(size, ext):
+    if not size:
+        return "страница курса"
+    if ext not in DOCS:
+        return "тип " + (ext or "без расширения")
+    if size > MAX_SIZE:
+        return "размер %.0f МБ" % (size / 1048576)
+    return None
 
 
 def label(content):
@@ -54,7 +68,7 @@ def label(content):
 
 def keys(contents):
     return sorted(key(m, c) for sec in contents for m in sec.get("modules", [])
-                  for c in m.get("contents") or [] if is_file(c) or is_link(c))
+                  for c in m.get("contents") or [] if kind(c) in ("file", "url"))
 
 
 def fresh(module, content, since, known):
@@ -74,35 +88,24 @@ def listing(cfg, moodle, course, since=None, everything=False):
     for sec in moodle.contents(course.id):
         for m in sec.get("modules", []):
             for c in m.get("contents") or []:
-                if is_link(c):
-                    item = {"name": label(c), "size": 0, "ext": "",
-                            "modified": moment(c.get("timemodified")), "url": c["fileurl"],
-                            "section": sec.get("name"), "module": m.get("name"),
-                            "modname": m.get("modname"), "path": None, "have": False,
-                            "newer": False, "new": fresh(m, c, since, known), "skip": "ссылка"}
-                    if everything or item["new"]:
-                        out.append(item)
+                k = kind(c)
+                if k not in ("file", "url"):
                     continue
-                if not is_file(c):
-                    continue
+                link = k == "url"
                 name = safe(c.get("filename"))
-                size = c.get("filesize") or 0
-                ext = pathlib.Path(name).suffix.lower()
-                have = present(into, name)
-                newer = bool(have) and (c.get("timemodified") or 0) > int(have.stat().st_mtime)
-                skip = None
-                if not size:
-                    skip = "страница курса"
-                elif ext not in DOCS:
-                    skip = "тип " + (ext or "без расширения")
-                elif size > MAX_SIZE:
-                    skip = "размер %.0f МБ" % (size / 1048576)
-                item = {"name": name, "size": size, "ext": ext,
-                        "modified": moment(c.get("timemodified")),
-                        "url": c["fileurl"], "section": sec.get("name"),
-                        "module": m.get("name"), "modname": m.get("modname"),
-                        "path": str(have or into / name), "have": bool(have), "newer": newer,
-                        "new": fresh(m, c, since, known), "skip": skip}
+                size = 0 if link else c.get("filesize") or 0
+                ext = "" if link else pathlib.Path(name).suffix.lower()
+                have = None if link else present(into, name)
+                item = {"name": label(c), "size": size, "ext": ext,
+                        "modified": moment(c.get("timemodified")), "url": c["fileurl"],
+                        "section": sec.get("name"), "module": m.get("name"),
+                        "modname": m.get("modname"),
+                        "path": None if link else str(have or into / name),
+                        "have": bool(have),
+                        "newer": bool(have) and (c.get("timemodified") or 0)
+                        > int(have.stat().st_mtime),
+                        "new": fresh(m, c, since, known),
+                        "skip": "ссылка" if link else skip_reason(size, ext)}
                 if everything or item["new"]:
                     out.append(item)
     out.sort(key=lambda x: -(x["modified"]["ts"] if x["modified"] else 0))

@@ -36,8 +36,12 @@ HINTS = {
 }
 
 
-def write_atomic(path, text, mode=None):
+def write_atomic(path, text, mode=None, dirmode=None):
     path = pathlib.Path(path)
+    if dirmode:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if os.name == "posix":
+            path.parent.chmod(dirmode)
     tmp = path.with_name(path.name + ".tmp")
     tmp.unlink(missing_ok=True)
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode or 0o666)
@@ -113,13 +117,13 @@ class Config:
             if not line or line.startswith("#"):
                 continue
             parts = line.split(None, 2)
-            if parts[0] == "CODE" and len(parts) == 3 and parts[1].isdigit():
-                self._codes[int(parts[1])] = parts[2].strip()
-            elif parts[0] == "FLOW" and len(parts) == 3 and parts[1].isdigit():
-                if parts[2].strip() not in FLOWS:
+            table = {"CODE": self._codes, "FLOW": self._flows}.get(parts[0])
+            if table is not None and len(parts) == 3 and parts[1].isdigit():
+                value = parts[2].strip()
+                if table is self._flows and value not in FLOWS:
                     raise StudyError("config", f"FLOW {parts[1]}: ожидается {' или '.join(FLOWS)}, "
-                                               f"а не «{parts[2].strip()}»")
-                self._flows[int(parts[1])] = parts[2].strip()
+                                               f"а не «{value}»")
+                table[int(parts[1])] = value
             elif "=" in line:
                 key, _, value = line.partition("=")
                 self._values[key.strip()] = value.strip()

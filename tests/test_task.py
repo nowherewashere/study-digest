@@ -1,20 +1,15 @@
-import unittest
 
 from study import fmt, local, task
-from study.config import Course, StudyError
-from study.moodle import Moodle
-from tests.fakes import FakeNet, config, fixture, patch, repo, tmpdir
+from study.config import StudyError
+from tests.fakes import MoodleCase, fixture, repo
 
 
-class TaskTest(unittest.TestCase):
+class TaskTest(MoodleCase):
+    EXTRA = "CODE 1 nettech\n"
+    ROOTS = (local, task)
+
     def setUp(self):
-        self.tmp = tmpdir(self)
-        for mod in (local, task):
-            patch(self, mod, "ROOT", self.tmp)
-        self.net = FakeNet().install(self)
-        self.cfg = config(self.tmp, "CODE 1 nettech\n")
-        self.m = Moodle(self.cfg)
-        self.course = Course(1, "nettech", "Сетевые технологии")
+        super().setUp()
         self.net.reply("POST", ("mod_assign_get_assignments", "courseids[0]=1"),
                        fixture("assignments"))
         self.net.reply("POST", ("core_course_get_contents", "courseid=1"),
