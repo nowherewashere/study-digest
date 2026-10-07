@@ -93,7 +93,8 @@ class CollectorTest(DigestCase):
     def collect(self, state=STATE):
         queue(self.net, since=bool(state))
         c = digest.Collector(self.cfg, Moodle(self.cfg), 21, state)
-        return c, c.run()
+        d, snap = c.gather()
+        return snap, d
 
     def test_sections(self):
         _, d = self.collect()
@@ -253,7 +254,7 @@ class CollectorTest(DigestCase):
         self.net.reply("POST", ("core_course_get_contents", "courseid=1"), v2)
         self.net.reply("GET", "task-2.pdf?forcedownload=1&token=test-token", b"%PDF-old")
         errors = []
-        digest.pull_updates(self.cfg, Moodle(self.cfg), d, errors)
+        d = digest.pull_updates(self.cfg, Moodle(self.cfg), d, errors)
         self.assertEqual((errors, d["updates"][0]["pulled"]), ([], ["task-2.pdf"]))
         self.assertEqual((self.tmp / "nettech/stash/task-2.pdf").read_bytes(), b"%PDF-old")
         self.assertIn("| nettech | Лабораторные работы | Задание 2: новые файлы | task-2.pdf |",
@@ -271,10 +272,10 @@ class CollectorTest(DigestCase):
             self.net.drop("mod_assign_get_submission_status", "assignid=11")
             self.net.reply("POST", ("mod_assign_get_submission_status", "assignid=11"),
                            fixture("submission_status_reopened"))
-            c = digest.Collector(self.cfg, Moodle(self.cfg), 21, state)
-            return c, c.run()
+            d, snap = digest.Collector(self.cfg, Moodle(self.cfg), 21, state).gather()
+            return snap, d
 
-        c, d = run({**STATE, "feedback": {}})
+        snap, d = run({**STATE, "feedback": {}})
         lab = next(a for a in d["deadlines"] if a["assign_id"] == 11)
         self.assertEqual((lab["submission"], lab["grade"], lab["feedback"], lab["feedback_new"]),
                          ("reopened", "4.00000", "Переделать раздел 3: нет схемы сети.", True))
@@ -287,7 +288,7 @@ class CollectorTest(DigestCase):
         self.assertIn("| nettech | ЛР 1 — Vagrant и Packer | Переделать раздел 3: нет схемы сети. "
                       "|", text)
         self.assertIn("- **ЛР 1 — Vagrant и Packer** · nettech", text)
-        self.assertEqual(c.snapshot(d)["feedback"], {"11": "Переделать раздел 3: нет схемы сети."})
+        self.assertEqual(snap["feedback"], {"11": "Переделать раздел 3: нет схемы сети."})
 
         _, d = run(STATE)
         self.assertFalse(next(a for a in d["deadlines"] if a["assign_id"] == 11)["feedback_new"])
@@ -318,10 +319,10 @@ class CollectorTest(DigestCase):
                        {"exception": "x", "errorcode": "dml", "message": "boom"})
         c = digest.Collector(self.cfg, Moodle(self.cfg), 21,
                              {**STATE, "announcements": {"1": [], "2": [7]}})
-        d = c.run()
+        d, snap = c.gather()
         self.assertEqual([a["id"] for a in d["announcements"]], [501, 500])
         self.assertEqual([e["where"] for e in d["errors"]], ["объявления курса 2"])
-        self.assertEqual(c.snapshot(d)["announcements"], {"1": [500, 501], "2": [7]})
+        self.assertEqual(snap["announcements"], {"1": [500, 501], "2": [7]})
 
     def test_offline_locked_extension(self):
         def run(aid, patch_status, state=STATE):
@@ -331,8 +332,8 @@ class CollectorTest(DigestCase):
             st["lastattempt"].update(patch_status)
             self.net.reply("POST", ("mod_assign_get_submission_status", f"assignid={aid}"), st)
             c = digest.Collector(self.cfg, Moodle(self.cfg), 21, state)
-            d = c.run()
-            return c, d, {a["short"]: a for a in d["overdue"] + d["deadlines"] + d["submitted"]}
+            d, snap = c.gather()
+            return snap, d, {a["short"]: a for a in d["overdue"] + d["deadlines"] + d["submitted"]}
 
         _, d, by = run(13, {"submissionsenabled": False})
         self.assertEqual(by["ДЗ 1 — Кодирование"]["submission"], "offline")
@@ -344,13 +345,13 @@ class CollectorTest(DigestCase):
         self.assertNotIn("ЛР 1 — Vagrant и Packer", names(d["not_started"]))
         self.assertIn("| ЛР 1 — Vagrant и Packer | nettech | заблокировано |",
                       digest.render_digest(d))
-        c, d, by = run(13, {"canedit": True, "extensionduedate": NOW + DAY})
+        snap, d, by = run(13, {"canedit": True, "extensionduedate": NOW + DAY})
         hw = by["ДЗ 1 — Кодирование"]
         self.assertEqual((hw["due"]["ts"], hw["closed"]), (NOW + DAY, False))
         self.assertIn("ДЗ 1 — Кодирование", names(d["deadlines"]))
         self.assertNotIn("ДЗ 1 — Кодирование", names(d["overdue"]))
         self.assertIn("ДЗ 1 — Кодирование", names(d["not_started"]))
-        self.assertEqual(c.snapshot(d)["assignments"]["13"], DUE[-5])
+        self.assertEqual(snap["assignments"]["13"], DUE[-5])
         self.assertNotIn("ДЗ 1 — Кодирование", names(d["moved"]))
         _, d, _ = run(13, {"canedit": True, "extensionduedate": NOW + 40 * DAY})
         self.assertNotIn("ДЗ 1 — Кодирование", names(d["overdue"]) + names(d["deadlines"]))
@@ -367,12 +368,12 @@ class CollectorTest(DigestCase):
         self.net.reply("POST", "core_webservice_get_site_info", fixture("site_info"))
         self.net.reply("POST", "core_enrol_get_users_courses", fixture("users_courses"))
         c = digest.Collector(self.cfg, Moodle(self.cfg), 21, {})
-        c.raw[14] = {"id": 14, "duedate": 0}
         st = fixture("submission_status_new")
         st["lastattempt"]["extensionduedate"] = NOW + DAY
         c.moodle = type("M", (), {"submission_status": staticmethod(lambda _aid: st)})()
         item = {"assign_id": 14, "due": None, "submission": None, "feedback": None}
-        c.status(item)
+        got = c.fetch_statuses([item], {14: {"id": 14, "duedate": 0}}, {})
+        item = digest.with_submission(item, got[14], None, NOW)
         self.assertEqual((item["due"]["ts"], item["submission"], c.errors), (NOW + DAY, "new", []))
 
     def test_grades_and_outside(self):
@@ -388,8 +389,7 @@ class CollectorTest(DigestCase):
                          [(3, 1, "Курсовая")])
 
     def test_snapshot(self):
-        c, d = self.collect()
-        s = c.snapshot(d)
+        s, _ = self.collect()
         self.assertEqual(s["last_run"], NOW)
         self.assertEqual(s["assignments"], {"11": DUE[3], "12": DUE[-2], "13": DUE[-5], "14": 0,
                                             "15": DUE[1], "16": 1793393940, "17": 1785704340,
@@ -410,7 +410,7 @@ class CollectorTest(DigestCase):
         self.net.reply("POST", ("core_course_get_contents", "courseid=2"),
                        {"exception": "x", "errorcode": "invalidrecord", "message": "no"})
         c = digest.Collector(self.cfg, Moodle(self.cfg), 21, {**STATE, "files": KEYS})
-        s = c.snapshot(c.run())
+        _, s = c.gather()
         self.assertEqual(s["files"], KEYS)
         self.assertIn("состав курса 2", [e["where"] for e in c.errors])
 

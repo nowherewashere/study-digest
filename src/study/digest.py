@@ -1,6 +1,6 @@
 import time
 
-from . import files, hosting, local, update
+from . import files, hosting, local, snapshot, update
 from .assigns import KINDS, SUBMISSION, Registry
 from .config import Course, StudyError, soft
 from .fmt import failures, md_table, moment, plain, short_name, weekday
@@ -20,14 +20,176 @@ def pending(a):
     return a["submission"] in PENDING or a["submission"] in (None, "offline")
 
 
-def news(course, m, section, what):
+def news(course, m, section, what, files_=(), links=()):
     return {"course": course, "section": section, "item": m["name"],
-            "modname": m.get("modname", ""), "files": [], "links": [], "what": what}
+            "modname": m.get("modname", ""), "files": list(files_), "links": list(links),
+            "what": what}
 
 
 def by_due(items):
     return sorted(items, key=lambda x: (x["due"]["ts"], x["course"].get("code") or "",
                                         x["short"]))
+
+
+def in_window(ts, now, horizon):
+    return now <= ts <= horizon
+
+
+def live_ids(items, now, horizon):
+    return [i for i, a in items.items() if a["due"]
+            and (in_window(a["due"]["ts"], now, horizon)
+                 or a["due"]["ts"] < now <= a["due"]["ts"] + MONTH)]
+
+
+def changes(items, known, since, now):
+    new, moved = [], []
+    for i, a in items.items():
+        prev, due = known.get(i), a["due"]["ts"] if a["due"] else 0
+        if since and prev is None and not a["retake"]:
+            new.append(i)
+        elif prev is not None and due and prev != due:
+            moved.append({**a, "was": moment(prev, now)})
+    return new, moved
+
+
+def with_submission(item, s, fb, now):
+    due = item["due"]
+    if s["due"] and s["due"] != (due or {}).get("ts"):
+        due = moment(s["due"], now)
+    return {**item, "submission": s["status"], "grade": s["grade"], "feedback": s["feedback"],
+            "graded": s["graded"], "closed": s["closed"], "canedit": s["canedit"],
+            "locked": s["locked"], "opens": moment(s["opens"], now) if s["opens"] else None,
+            "due": due,
+            "feedback_new": bool(s["feedback"]) and fb is not None
+            and fb.get(str(item["assign_id"])) != s["feedback"]}
+
+
+def with_statuses(items, statuses, fb, now):
+    return {i: with_submission(a, statuses[a["assign_id"]], fb, now)
+            if statuses.get(a["assign_id"]) else a for i, a in items.items()}
+
+
+def originals(retakes, items):
+    labs = {(a["course"]["id"], a["lab"]): a for a in items.values() if a["lab"]}
+    return {r["cmid"]: labs.get((r["course"]["id"], r["retake"])) for r in retakes}
+
+
+def retake_info(retakes, items):
+    return {cmid: {"retake_of": orig["assign_id"] if orig else None,
+                   "needed": orig is None or (orig["submission"] != "submitted"
+                                              and not orig.get("graded")
+                                              and (not orig["due"] or orig["due"]["overdue"]
+                                                   or orig.get("closed")))}
+            for cmid, orig in originals(retakes, items).items()}
+
+
+def merged(a, *extras):
+    for extra in extras:
+        a = {**a, **extra.get(a["cmid"], {})}
+    return a
+
+
+def deadline_sections(soon, overdue):
+    deadlines = [a for a in soon if a.get("needed", True)]
+    late = [a for a in overdue if a.get("needed", True)]
+    live = by_due(soon + overdue)
+    return {
+        "deadlines": deadlines,
+        "overdue": [a for a in late if pending(a)],
+        "submitted": [a for a in late if not pending(a)],
+        "not_started": [a for a in late + deadlines
+                        if a["source"] == "assign_api" and a["submission"] in PENDING
+                        and not a.get("closed")],
+        "feedback": [a for a in live if a.get("feedback_new")],
+        "retakes": [{"assign_id": a.get("assign_id"), "cmid": a["cmid"], "short": a["short"],
+                     "course": a["course"], "due": a["due"], "retake_of": a["retake_of"],
+                     "needed": a["needed"]} for a in live if a.get("retake")],
+    }
+
+
+def quiz_item(q, tries, course, now):
+    states = [t.get("state") for t in tries or []]
+    return {"kind": "quiz", "source": "quiz", "quiz_id": q["id"], "course": course,
+            "name": q["name"], "short": short_name(q["name"]),
+            "due": moment(q["timeclose"], now),
+            "submission": "submitted" if "finished" in states else None,
+            "opens": moment(q["timeopen"], now) if (q.get("timeopen") or 0) > now else None,
+            "open_attempt": any(st in ("inprogress", "overdue") for st in states),
+            "attempts_used": None if tries is None else len(tries),
+            "attempts_max": q.get("attempts") or None,
+            "timelimit_min": (q.get("timelimit") or 0) // 60 or None}
+
+
+def flagged_rows(course, changed, modules):
+    rows = {}
+    for u in changed:
+        kinds = {x["name"] for x in u["updates"]} & USEFUL
+        if kinds:
+            m, section = modules.get(u["id"], ({"name": f"(модуль {u['id']})"}, ""))
+            rows[u["id"]] = news(course, m, section,
+                                 "новые файлы" if kinds & FILES else "изменены настройки")
+    return rows
+
+
+def content_rows(course, modules, since, known):
+    rows = {}
+    for mid, (m, section) in modules.items():
+        fresh = [c for c in m.get("contents") or [] if files.fresh(m, c, since, known)]
+        new_files = [files.label(c) for c in fresh if files.is_file(c) and c.get("filesize")]
+        links = [c["fileurl"] for c in fresh if files.is_link(c)]
+        if new_files or links:
+            rows[mid] = news(course, m, section, "новые файлы" if new_files else "новая ссылка",
+                             new_files, links)
+    return rows
+
+
+def update_rows(course, changed, modules, since, known):
+    flagged = flagged_rows(course, changed, modules)
+    fresh = content_rows(course, modules, since, known)
+    both = {mid: {**flagged.get(mid, r), "files": r["files"], "links": r["links"]}
+            for mid, r in fresh.items()}
+    return list({**flagged, **both}.values())
+
+
+def fresh_discussions(discussions, known, since):
+    return [d for d in discussions
+            if (d["id"] not in known if known is not None
+                else (d.get("timemodified") or d.get("created") or 0) > since)]
+
+
+def course_grades(course, report, known):
+    before = (known or {}).get(str(course["id"]), {})
+    out = []
+    for t in report:
+        got = [i for i in t.get("gradeitems", [])
+               if i.get("graderaw") is not None and i.get("itemtype") != "course"]
+        if not got:
+            continue
+        total = next((i for i in t.get("gradeitems", []) if i.get("itemtype") == "course"), None)
+        raw = total.get("graderaw") if total else None
+        tot = ({"raw": raw, "max": total["grademax"], "computed": False} if raw is not None else
+               {"raw": sum(i["graderaw"] for i in got),
+                "max": (total or {}).get("grademax") or sum(i["grademax"] for i in got),
+                "computed": True})
+        items = [{"name": i["itemname"], "short": short_name(i["itemname"], tail=False),
+                  "raw": i["graderaw"], "max": i["grademax"],
+                  "new": known is not None and before.get(i["itemname"]) != i["graderaw"]}
+                 for i in got]
+        out.append({"course": course, "items": items, "total": tot})
+    return out
+
+
+def outside_courses(events, tracked, ignore, now, horizon):
+    groups = {}
+    for e in events:
+        c = e.get("course") or {}
+        if (c.get("id") and c["id"] not in tracked and c["id"] not in ignore
+                and in_window(e.get("timesort", 0), now, horizon)):
+            groups.setdefault((c["id"], c.get("fullname") or c.get("shortname")), []).append(e)
+    return [{"course": {"id": cid, "title": name}, "count": len(evs),
+             "nearest": {"name": (min(evs, key=lambda x: x["timesort"])["name"] or "")[:60],
+                         "at": moment(min(e["timesort"] for e in evs), now)}}
+            for (cid, name), evs in groups.items()]
 
 
 class Collector:
@@ -37,22 +199,12 @@ class Collector:
         self.now = int(time.time())
         self.days = days
         self.horizon = self.now + days * DAY
+        self.state = state
         self.since = state.get("last_run")
-        self.known = state.get("assignments", {})
-        self.graded = state.get("grades")
-        self.files = state.get("files")
-        self.seen_courses = state.get("courses")
-        self.fb = state.get("feedback")
-        self.announced = state.get("announcements")
-        self._forums = {}
         self.errors = list(errors)
         self.courses = {c.id: c for c in cfg.track(moodle.courses())}
         self.reg = Registry(moodle, soft=self.soft, contents=self.contents)
         self.ignore = cfg.ignore()
-        self.assigns = {}
-        self.raw = {}
-        self.asked = set()
-        self.soon, self.overdue = [], []
         self._contents = {}
 
     def soft(self, where):
@@ -69,85 +221,33 @@ class Collector:
                 self._contents[cid] = self.moodle.contents(cid)
         return self._contents[cid] or []
 
-    def within(self, ts):
-        return self.now <= ts <= self.horizon
+    def fetch_statuses(self, items, raw, got):
+        out = dict(got)
+        for a in items:
+            aid = a["assign_id"]
+            if aid in out:
+                continue
+            out[aid] = None
+            with self.soft(f"статус задания {aid}"):
+                out[aid] = submission_state(raw[aid], self.moodle.submission_status(aid),
+                                            self.now)
+        return out
 
-
-    def assignments(self):
-        new, moved = [], []
-        for course in self.courses.values():
-            for w in self.reg.works(course, contents=False):
-                item = w.as_item(self.now)
-                self.assigns[str(w.assign_id)] = item
-                self.raw[w.assign_id] = w.raw
-                due = w.due or 0
-                prev = self.known.get(str(w.assign_id))
-                if self.since and prev is None and not item["retake"]:
-                    new.append(item)
-                elif prev is not None and due and prev != due:
-                    moved.append({**item, "was": moment(prev, self.now)})
-                if not due:
-                    continue
-                if self.within(due):
-                    self.soon.append(item)
-                elif due < self.now <= due + MONTH:
-                    self.overdue.append(item)
-
-        live = by_due(self.soon + self.overdue)
-        for item in live:
-            if not item["retake"]:
-                self.status(item)
-        self.retakes([a for a in live if a["retake"]])
-        self.soon = [a for a in live if self.within(a["due"]["ts"])]
-        self.overdue = [a for a in live if a["due"]["ts"] < self.now]
-        return new, moved
-
-    def status(self, item):
-        if item["assign_id"] in self.asked:
-            return
-        self.asked.add(item["assign_id"])
-        with self.soft(f"статус задания {item['assign_id']}"):
-            st = self.moodle.submission_status(item["assign_id"])
-            s = submission_state(self.raw[item["assign_id"]], st, self.now)
-            item.update(submission=s["status"], grade=s["grade"], feedback=s["feedback"],
-                        graded=s["graded"], closed=s["closed"], canedit=s["canedit"],
-                        locked=s["locked"],
-                        opens=moment(s["opens"], self.now) if s["opens"] else None)
-            if s["due"] and s["due"] != (item["due"] or {}).get("ts"):
-                item["due"] = moment(s["due"], self.now)
-            item["feedback_new"] = bool(item["feedback"]) and self.fb is not None \
-                and self.fb.get(str(item["assign_id"])) != item["feedback"]
-
-    def retakes(self, items):
-        labs = {(a["course"]["id"], a["lab"]): a for a in self.assigns.values() if a["lab"]}
-        for r in items:
-            orig = labs.get((r["course"]["id"], r["retake"]))
-            r["retake_of"] = orig["assign_id"] if orig else None
-            if orig:
-                self.status(orig)
-            r["needed"] = orig is None or (orig["submission"] != "submitted"
-                                           and not orig.get("graded")
-                                           and (not orig["due"] or orig["due"]["overdue"]
-                                                or orig.get("closed")))
-            if r["needed"] and r["source"] == "assign_api":
-                self.status(r)
-
-    def activities(self):
-        seen = {a["cmid"] for a in self.assigns.values()}
+    def activity_items(self, seen):
         others = set(KINDS) - {"assign"}
+        out = []
         for course in self.courses.values():
             works = [w for w in self.reg.works(course) if w.cmid not in seen]
             works += self.reg.modules(course, others)
-            for w in works:
-                if w.due and self.within(w.due):
-                    self.soon.append(w.as_item(self.now))
-        self.retakes([a for a in self.soon if a["source"] == "course_contents" and a["retake"]])
+            out += [w.as_item(self.now) for w in works
+                    if w.due and in_window(w.due, self.now, self.horizon)]
+        return out
 
-    def choices(self):
-        picks = [a for a in self.soon if a.get("modname") == "choice"]
+    def fetch_choices(self, items):
+        picks = [a for a in items if a.get("modname") == "choice"]
+        by_cmid, out = {}, {}
         if not picks:
-            return
-        by_cmid = {}
+            return out
         with self.soft("темы докладов"):
             by_cmid = {c["coursemodule"]: c["id"]
                        for c in self.moodle.choices({a["course"]["id"] for a in picks})}
@@ -158,9 +258,11 @@ class Collector:
             with self.soft(f"варианты выбора {cid}"):
                 opts = self.moodle.choice_options(cid)
                 mine = [o["text"] for o in opts if o.get("checked")]
-                a["choice"] = {"chosen": mine[0] if mine else None,
-                               "options": sum(1 for o in opts if not o.get("disabled"))}
-                a["submission"] = "submitted" if mine else "new"
+                out[a["cmid"]] = {
+                    "choice": {"chosen": mine[0] if mine else None,
+                               "options": sum(1 for o in opts if not o.get("disabled"))},
+                    "submission": "submitted" if mine else "new"}
+        return out
 
     def quizzes(self):
         out = []
@@ -172,18 +274,7 @@ class Collector:
                 tries = None
                 with self.soft(f"попытки теста {q['id']}"):
                     tries = self.moodle.quiz_attempts(q["id"])
-                states = [t.get("state") for t in tries or []]
-                item = {"kind": "quiz", "source": "quiz", "quiz_id": q["id"],
-                        "course": self.course(q["course"]), "name": q["name"],
-                        "short": short_name(q["name"]), "due": moment(close, self.now),
-                        "submission": "submitted" if "finished" in states else None,
-                        "opens": (moment(q["timeopen"], self.now)
-                                  if (q.get("timeopen") or 0) > self.now else None),
-                        "open_attempt": any(st in ("inprogress", "overdue") for st in states),
-                        "attempts_used": None if tries is None else len(tries),
-                        "attempts_max": q.get("attempts") or None,
-                        "timelimit_min": (q.get("timelimit") or 0) // 60 or None}
-                out.append(item)
+                out.append(quiz_item(q, tries, self.course(q["course"]), self.now))
         return by_due(out)
 
     def updates(self):
@@ -197,33 +288,15 @@ class Collector:
                            if u.get("updates")]
             modules = {m["id"]: (m, sec["name"]) for sec in self.contents(cid)
                        for m in sec.get("modules", [])}
-            known = self.files.get(str(cid)) if self.files is not None else None
-            known = set(known) if known is not None else None
-            rows, course = {}, self.course(cid)
-            for u in changed:
-                kinds = {x["name"] for x in u["updates"]} & USEFUL
-                if not kinds:
-                    continue
-                m, section = modules.get(u["id"], ({"name": f"(модуль {u['id']})"}, ""))
-                rows[u["id"]] = news(course, m, section,
-                                     "новые файлы" if kinds & FILES else "изменены настройки")
-            for mid, (m, section) in modules.items():
-                fresh = [c for c in m.get("contents") or []
-                         if files.fresh(m, c, self.since, known)]
-                new_files = [files.label(c) for c in fresh
-                             if files.is_file(c) and c.get("filesize")]
-                links = [c["fileurl"] for c in fresh if files.is_link(c)]
-                if new_files or links:
-                    rows.setdefault(mid, news(course, m, section,
-                                              "новые файлы" if new_files else "новая ссылка"))
-                    rows[mid]["files"], rows[mid]["links"] = new_files, links
-            out.extend(rows.values())
+            known = (self.state.get("files") or {}).get(str(cid))
+            out += update_rows(self.course(cid), changed, modules, self.since,
+                               set(known) if known is not None else None)
         return out
 
     def announcements(self):
-        out = []
+        out, seen = [], {}
         if not self.since:
-            return out
+            return out, seen
         forums = []
         with self.soft("форумы"):
             forums = [f for f in self.moodle.forums(list(self.courses)) if f.get("type") == "news"]
@@ -232,18 +305,18 @@ class Collector:
             if cid not in self.courses:
                 continue
             with self.soft(f"объявления курса {cid}"):
-                known = (self.announced or {}).get(str(cid))
-                seen = self._forums.setdefault(cid, [])
-                for d in self.moodle.discussions(f["id"]):
-                    seen.append(d["id"])
+                known = (self.state.get("announcements") or {}).get(str(cid))
+                seen.setdefault(cid, [])
+                found = self.moodle.discussions(f["id"])
+                seen[cid] += [d["id"] for d in found]
+                for d in fresh_discussions(found, known, self.since):
                     ts = d.get("timemodified") or d.get("created") or 0
-                    if (d["id"] not in known) if known is not None else ts > self.since:
-                        out.append({"id": d["id"], "course": self.course(cid),
-                                    "at": moment(ts, self.now),
-                                    "subject": plain(d.get("subject") or d.get("name"), 120),
-                                    "author": d.get("userfullname") or "",
-                                    "text": plain(d.get("message"), 200)})
-        return sorted(out, key=lambda a: -a["at"]["ts"])
+                    out.append({"id": d["id"], "course": self.course(cid),
+                                "at": moment(ts, self.now),
+                                "subject": plain(d.get("subject") or d.get("name"), 120),
+                                "author": d.get("userfullname") or "",
+                                "text": plain(d.get("message"), 200)})
+        return sorted(out, key=lambda a: -a["at"]["ts"]), seen
 
     def notifications(self):
         out = []
@@ -264,108 +337,85 @@ class Collector:
                     if e.code == "nopermissiontoviewgrades":
                         continue
                     raise
-                for t in report:
-                    got = [i for i in t.get("gradeitems", [])
-                           if i.get("graderaw") is not None and i.get("itemtype") != "course"]
-                    if not got:
-                        continue
-                    total = next((i for i in t.get("gradeitems", [])
-                                  if i.get("itemtype") == "course"), None)
-                    raw = total.get("graderaw") if total else None
-                    tot = ({"raw": raw, "max": total["grademax"], "computed": False}
-                           if raw is not None else
-                           {"raw": sum(i["graderaw"] for i in got),
-                            "max": (total or {}).get("grademax") or sum(i["grademax"] for i in got),
-                            "computed": True})
-                    before = (self.graded or {}).get(str(cid), {})
-                    items = [{"name": i["itemname"], "short": short_name(i["itemname"], tail=False),
-                              "raw": i["graderaw"], "max": i["grademax"],
-                              "new": self.graded is not None
-                              and before.get(i["itemname"]) != i["graderaw"]}
-                             for i in got]
-                    out.append({"course": self.course(cid), "items": items, "total": tot})
+                out += course_grades(self.course(cid), report, self.state.get("grades"))
         return out
 
     def outside(self):
         events = []
         with self.soft("календарь"):
             events = self.moodle.calendar(self.now - 7 * DAY, self.now + 120 * DAY)
-        groups = {}
-        for e in events:
-            c = e.get("course") or {}
-            if (c.get("id") and c["id"] not in self.courses and c["id"] not in self.ignore
-                    and self.within(e.get("timesort", 0))):
-                groups.setdefault((c["id"], c.get("fullname") or c.get("shortname")), []).append(e)
-        return [{"course": {"id": cid, "title": name}, "count": len(evs),
-                 "nearest": {"name": (min(evs, key=lambda x: x["timesort"])["name"] or "")[:60],
-                             "at": moment(min(e["timesort"] for e in evs), self.now)}}
-                for (cid, name), evs in groups.items()]
-
+        return outside_courses(events, self.courses, self.ignore, self.now, self.horizon)
 
     def run(self):
-        new, moved = self.assignments()
-        self.activities()
-        self.choices()
-        deadlines = [a for a in by_due(self.soon) if a.get("needed", True)]
-        overdue = [a for a in by_due(self.overdue) if a.get("needed", True)]
-        return {
-            "schema": 1, "now": moment(self.now, self.now), "days": self.days,
+        return self.gather()[0]
+
+    def gather(self):
+        now, fb = self.now, self.state.get("feedback")
+        works = [w for c in self.courses.values() for w in self.reg.works(c, contents=False)]
+        raw = {w.assign_id: w.raw for w in works}
+        base = {str(w.assign_id): w.as_item(now) for w in works}
+        new_ids, moved = changes(base, self.state.get("assignments", {}), self.since, now)
+
+        live = by_due([base[i] for i in live_ids(base, now, self.horizon)])
+        retakes = [a for a in live if a["retake"]]
+        st = self.fetch_statuses([a for a in live if not a["retake"]], raw, {})
+        items = with_statuses(base, st, fb, now)
+        st = self.fetch_statuses([o for o in originals(retakes, items).values() if o], raw, st)
+        items = with_statuses(base, st, fb, now)
+        info = retake_info(retakes, items)
+        st = self.fetch_statuses([a for a in retakes if info[a["cmid"]]["needed"]], raw, st)
+        items = with_statuses(base, st, fb, now)
+        ids = [str(a["assign_id"]) for a in live]
+        soon_ids = [i for i in ids if in_window(items[i]["due"]["ts"], now, self.horizon)]
+        late_ids = [i for i in ids if items[i]["due"]["ts"] < now]
+
+        extras = self.activity_items({a["cmid"] for a in base.values()})
+        later = [a for a in extras if a["source"] == "course_contents" and a["retake"]]
+        st = self.fetch_statuses([o for o in originals(later, items).values() if o], raw, st)
+        items = with_statuses(base, st, fb, now)
+        info = {**info, **retake_info(later, items)}
+        picks = self.fetch_choices(extras)
+
+        soon = by_due([merged(items[i], info) for i in soon_ids]
+                      + [merged(a, info, picks) for a in extras])
+        overdue = by_due([merged(items[i], info) for i in late_ids])
+        quizzes = self.quizzes()
+        announcements, seen = self.announcements()
+        updates = self.updates()
+        notifications = self.notifications()
+        grades = self.grades()
+        outside = self.outside()
+        known = self.state.get("courses")
+        data = {
+            "schema": 1, "now": moment(now, now), "days": self.days,
             "first_run": not self.since,
-            "since": moment(self.since, self.now) if self.since else None,
+            "since": moment(self.since, now) if self.since else None,
             "courses": [c.as_dict() for c in self.courses.values()],
             "new_courses": [c.as_dict() for c in self.courses.values()
-                            if self.seen_courses is not None
-                            and str(c.id) not in self.seen_courses],
-            "deadlines": deadlines,
-            "overdue": [a for a in overdue if pending(a)],
-            "submitted": [a for a in overdue if not pending(a)],
-            "not_started": [a for a in overdue + deadlines
-                            if a["source"] == "assign_api" and a["submission"] in PENDING
-                            and not a.get("closed")],
-            "feedback": [a for a in by_due(self.soon + self.overdue) if a.get("feedback_new")],
-            "retakes": [{"assign_id": a.get("assign_id"), "cmid": a["cmid"], "short": a["short"],
-                         "course": a["course"], "due": a["due"], "retake_of": a["retake_of"],
-                         "needed": a["needed"]}
-                        for a in by_due(self.soon + self.overdue) if a.get("retake")],
-            "quizzes": self.quizzes(),
-            "announcements": self.announcements(),
-            "updates": self.updates(), "new_assignments": new, "moved": moved,
-            "notifications": self.notifications(), "grades": self.grades(),
-            "outside": self.outside(),
-            "errors": self.errors,
+                            if known is not None and str(c.id) not in known],
+            **deadline_sections(soon, overdue),
+            "quizzes": quizzes, "announcements": announcements, "updates": updates,
+            "new_assignments": [items[i] for i in new_ids], "moved": moved,
+            "notifications": notifications, "grades": grades, "outside": outside,
+            "errors": list(self.errors),
         }
-
-    def snapshot(self, data):
-        return {
-            "last_run": self.now,
-            "assignments": {i: self.raw[a["assign_id"]].get("duedate") or 0
-                            for i, a in self.assigns.items()},
-            "courses": {str(c.id): c.title for c in self.courses.values()},
-            "grades": {str(g["course"]["id"]): {i["name"]: i["raw"] for i in g["items"]}
-                       for g in data["grades"]},
-            "files": {str(cid): files.keys(self._contents[cid])
-                      if self._contents.get(cid) is not None
-                      else (self.files or {}).get(str(cid), [])
-                      for cid in self.courses},
-            "announcements": {str(cid): sorted(set((self.announced or {}).get(str(cid), []))
-                                               | set(self._forums[cid]))[-50:]
-                              if cid in self._forums
-                              else (self.announced or {}).get(str(cid), [])
-                              for cid in self.courses},
-            "feedback": {**(self.fb or {}),
-                         **{str(a["assign_id"]): a["feedback"] for a in self.assigns.values()
-                            if a.get("feedback")}},
-        }
+        snap = snapshot.build(
+            now, self.state, {str(c.id): c.title for c in self.courses.values()},
+            {i: raw[a["assign_id"]].get("duedate") or 0 for i, a in base.items()},
+            {str(g["course"]["id"]): {i["name"]: i["raw"] for i in g["items"]} for g in grades},
+            {str(cid): files.keys(c) for cid, c in self._contents.items() if c is not None},
+            seen,
+            {str(a["assign_id"]): a["feedback"] for a in items.values() if a.get("feedback")})
+        return data, snap
 
 
 def collect(cfg, moodle, days=None, save=True, since=None):
     errors = []
-    c = Collector(cfg, moodle, days or cfg.days(), load_state(cfg, since, errors), errors)
-    data = c.run()
+    data, snap = Collector(cfg, moodle, days or cfg.days(),
+                           load_state(cfg, since, errors), errors).gather()
     if save:
-        save_state(cfg, c.snapshot(data))
+        save_state(cfg, snap)
     return data
-
 
 
 def attempts(q):
@@ -558,55 +608,61 @@ def render_digest(d):
 
 
 def pull_updates(cfg, moodle, tuis, errors):
+    pulled = {}
     for c in tuis["courses"]:
         todo = [u for u in tuis["updates"] if u["files"] and u["course"]["id"] == c["id"]]
         if not todo or not c["code"]:
             continue
-        course = Course(c["id"], c["code"], c["title"])
         wanted = {n for u in todo for n in u["files"]}
         with soft(errors, f"файлы, курс {c['code']}"):
-            d = files.listing(cfg, moodle, course, everything=True)
+            d = files.listing(cfg, moodle, Course(c["id"], c["code"], c["title"]),
+                              everything=True)
             d["files"] = [f for f in d["files"] if f["name"] in wanted]
             got = files.pull(moodle, d)
             names = [g["name"] for g in got["pulled"]]
-            for u in todo:
-                u["pulled"] = [n for n in u["files"] if n in names]
+            pulled[c["id"]] = names
             errors.extend(got["errors"])
+    return {**tuis, "updates": [
+        {**u, "pulled": [n for n in u["files"] if n in pulled[u["course"]["id"]]]}
+        if u["files"] and u["course"]["id"] in pulled else u for u in tuis["updates"]]}
+
+
+def host_state(cfg, repo, cls, tags, course, errors):
+    slug = local.repo_from_remote(repo, cls.remote, cls.host)
+    release, missing = {"ok": False, "latest": None}, []
+    with soft(errors, f"{cls.source}, курс {course.code}"):
+        rels = cls(cfg, path=repo).releases()
+        names = [r["tag"] for r in rels]
+        release = {"ok": True, "latest": rels[0] if rels else None, "tags": names}
+        missing = [t for t in tags if t not in names]
+    return slug or None, release, missing
+
+
+def lab_state(lab, found):
+    return {**lab,
+            "tuis": ({"assign_id": found["assign_id"], "name": found["name"],
+                      "due": found["due"], "submission": found["submission"],
+                      "matched_by": "number"} if found else None),
+            "ready": {"report": lab["report"]["built"],
+                      "presentation": lab["presentation"]["built"],
+                      "videos": lab["videos"]["filled"] == lab["videos"]["total"],
+                      "submitted": bool(found and found["submission"] == "submitted")}}
 
 
 def course_state(cfg, course, by_lab, errors):
-    item = {**course.as_dict(), "dir": str(course.dir), "flow": local.flow_of(cfg, course.code),
-            "repo": None, "releases": {}, "unreleased_tags": [], "labs": []}
-    repo = local.course_repo(course.code) if item["flow"] == "release" else None
+    flow = local.flow_of(cfg, course.code)
+    head = {**course.as_dict(), "dir": str(course.dir), "flow": flow}
+    repo = local.course_repo(course.code) if flow == "release" else None
     if not repo:
-        return item
-    item["repo"] = local.repo_state(repo)
-    item["repo"]["remotes"] = {}
-    for cls in hosting.HOSTS.values():
-        slug = local.repo_from_remote(repo, cls.remote, cls.host)
-        item["repo"]["remotes"][cls.source] = slug or None
-        item["releases"][cls.source] = {"ok": False, "latest": None}
-        with soft(errors, f"{cls.source}, курс {course.code}"):
-            rels = cls(cfg, path=repo).releases()
-            tags = [r["tag"] for r in rels]
-            item["releases"][cls.source] = {"ok": True, "latest": rels[0] if rels else None,
-                                            "tags": tags}
-            missing = [t for t in item["repo"]["tags"] if t not in tags]
-            if missing:
-                item["unreleased_tags"].append({"hosting": cls.source, "tags": missing})
-    for lab in local.labs(repo, course.code):
-        found = by_lab.get((course.code, lab["num"]))
-        lab["tuis"] = ({"assign_id": found["assign_id"], "name": found["name"],
-                        "due": found["due"], "submission": found["submission"],
-                        "matched_by": "number"} if found else None)
-        lab["ready"] = {
-            "report": lab["report"]["built"],
-            "presentation": lab["presentation"]["built"],
-            "videos": lab["videos"]["filled"] == lab["videos"]["total"],
-            "submitted": bool(found and found["submission"] == "submitted"),
-        }
-        item["labs"].append(lab)
-    return item
+        return {**head, "repo": None, "releases": {}, "unreleased_tags": [], "labs": []}
+    info = local.repo_state(repo)
+    hosts = {cls.source: host_state(cfg, repo, cls, info["tags"], course, errors)
+             for cls in hosting.HOSTS.values()}
+    return {**head, "repo": {**info, "remotes": {s: h[0] for s, h in hosts.items()}},
+            "releases": {s: h[1] for s, h in hosts.items()},
+            "unreleased_tags": [{"hosting": s, "tags": h[2]} for s, h in hosts.items() if h[2]],
+            "labs": [lab_state(lab, by_lab.get((course.code, lab["num"])))
+                     for lab in local.labs(repo, course.code)]}
 
 
 def state(cfg, moodle, days=None, with_tuis=True, save=True, pull=False, since=None):
@@ -615,7 +671,7 @@ def state(cfg, moodle, days=None, with_tuis=True, save=True, pull=False, since=N
     if with_tuis:
         tuis = collect(cfg, moodle, days=days, save=save, since=since)
         if pull:
-            pull_updates(cfg, moodle, tuis, errors)
+            tuis = pull_updates(cfg, moodle, tuis, errors)
 
     t = tuis or {}
     by_lab = {(a["course"]["code"], a["lab"]): a
