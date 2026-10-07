@@ -1,4 +1,3 @@
-"""Локальное состояние: git, репозиторий курса, лабы, собранные файлы."""
 import os
 import pathlib
 import re
@@ -7,8 +6,6 @@ import sys
 
 from .config import ROOT, StudyError
 
-# Регламент профиля release (см. FLOW в config.env): лабы в labs/labNN репозитория курса,
-# ссылки на скринкасты в <код>/tuis/labNN.env — плейлист и четыре записи на двух площадках.
 SITES = {"RUTUBE": "Rutube", "VK": "VKvideo"}
 SLOTS = {"LAB": "Выполнение лабораторной работы", "REPORT": "Подготовка отчёта",
          "PRESENTATION": "Подготовка презентации", "DEFENSE": "Защита лабораторной работы"}
@@ -17,8 +14,6 @@ LABS_DIR = "labs"
 
 
 def run(path, *args, timeout=None):
-    """CompletedProcess команды git в каталоге path; None — не дождались за timeout.
-    Без терминала (задача по расписанию) сеть идёт без запросов пароля, чтобы не зависнуть."""
     env = dict(os.environ)
     if not sys.stdin.isatty():
         env.setdefault("GIT_TERMINAL_PROMPT", "0")
@@ -32,7 +27,6 @@ def run(path, *args, timeout=None):
 
 
 def git(path, *args, check=False, timeout=None):
-    """stdout команды git; при ошибке или таймауте — "" (StudyError, если check)."""
     r = run(path, *args, timeout=timeout)
     if r is None:
         if check:
@@ -44,15 +38,12 @@ def git(path, *args, check=False, timeout=None):
 
 
 def repo_slug(url):
-    """ssh://[user@]host[:port]/owner/repo.git, git@host:owner/repo.git, https://… → owner/repo."""
     s = re.sub(r"^[a-z]+://([^@/]+@)?[^/]+/", "", url or "")
     s = re.sub(r"^[^/@]+@[^:]+:", "", s)
     return re.sub(r"\.git$", "", s)
 
 
 def repo_from_remote(path, remote, host=None):
-    """owner/repo из remote. `host` защищает от чужого репозитория: имя remote совпало,
-    а адрес ведёт на другой хостинг — значит это не он."""
     url = git(path, "remote", "get-url", remote)
     if host and host not in url:
         return ""
@@ -60,13 +51,11 @@ def repo_from_remote(path, remote, host=None):
 
 
 def find_repo(start=None):
-    """Каталог git-репозитория, в котором мы находимся."""
     top = git(start or pathlib.Path.cwd(), "rev-parse", "--show-toplevel")
     return pathlib.Path(top) if top else None
 
 
 def course_repo(code):
-    """Репозиторий курса внутри ~/work/study/<код>/."""
     d = ROOT / code
     if not d.is_dir():
         return None
@@ -75,20 +64,15 @@ def course_repo(code):
 
 
 def flow_of(cfg, code):
-    """Профиль сдачи курса: строка FLOW в config.env, а без неё — release, если в папке курса
-    есть репозиторий, иначе file."""
     cid = next((i for i, c in cfg.codes().items() if c == code), None)
     return cfg.flows().get(cid) or ("release" if course_repo(code) else "file")
 
 
 def tuis_dir(code):
-    """Материалы для сдачи в ТУИС — рядом с предметом, а не внутри репозитория курса:
-    в репозитории курса лежит только сама работа, преподаватель смотрит именно его."""
     return ROOT / code / "tuis"
 
 
 def lab_id(num):
-    """Номер лабы как в каталоге: '1', '01', 'lab1' → '01'; не номер — StudyError."""
     m = re.fullmatch(r"(?:lab)?(\d{1,2})", str(num).strip().lower())
     if not m:
         raise StudyError("local", f"ожидается номер лабораторной (NN), а не «{num}»")
@@ -96,7 +80,6 @@ def lab_id(num):
 
 
 def videos(code, num):
-    """Состояние <код>/tuis/labNN.env — ссылок на скринкасты."""
     f = tuis_dir(code) / f"lab{num}.env"
     if not f.exists():
         return {"path": str(f), "exists": False, "filled": 0, "total": len(VIDEO_KEYS),
@@ -112,7 +95,6 @@ def videos(code, num):
 
 
 def labs(repo, code):
-    """Лабы репозитория: исходники, собранные файлы, ссылки на записи, заготовка ответа."""
     out = []
     for lab in sorted((repo / LABS_DIR).glob("lab*")):
         item = {"num": lab.name[3:], "path": str(lab)}
@@ -128,7 +110,6 @@ def labs(repo, code):
 
 
 def repo_state(repo):
-    """Ветка, незакоммиченное, теги. Адреса на хостингах знает hosting.py, он их и дописывает."""
     return {
         "path": str(repo),
         "branch": git(repo, "branch", "--show-current"),
@@ -140,5 +121,4 @@ def repo_state(repo):
 
 
 def tag_sha(repo, tag):
-    """Полный SHA коммита тега — GitVerse принимает только его."""
     return git(repo, "rev-parse", f"{tag}^{{commit}}", check=True)

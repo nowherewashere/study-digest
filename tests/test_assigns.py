@@ -1,4 +1,3 @@
-"""Реестр заданий курса: слияние mod_assign и состава курса в одну модель."""
 import unittest
 
 from study import assigns
@@ -16,7 +15,6 @@ class RegistryTest(unittest.TestCase):
         self.course = Course(1, "nettech", "Сетевые технологии")
 
     def both(self):
-        """Ответы обеих ручек по курсу 1; каждый отдаётся один раз — значит проверяется и кеш."""
         self.net.reply("POST", ("mod_assign_get_assignments", "courseids[0]=1"),
                        fixture("assignments"))
         self.net.reply("POST", ("core_course_get_contents", "courseid=1"),
@@ -27,10 +25,10 @@ class RegistryTest(unittest.TestCase):
         r = self.both()
         works = r.works(self.course)
         by_cmid = {w.cmid: w for w in works}
-        self.assertEqual(len(works), len(by_cmid))          # дублей по cmid нет
-        self.assertIn(111, by_cmid)                          # из mod_assign
-        self.assertIn(115, by_cmid)                          # только из состава курса
-        self.assertEqual(r.works(self.course), works)        # второй раз — из кеша, без сети
+        self.assertEqual(len(works), len(by_cmid))
+        self.assertIn(111, by_cmid)
+        self.assertIn(115, by_cmid)
+        self.assertEqual(r.works(self.course), works)
 
     def test_api_wins_over_contents(self):
         w = next(x for x in self.both().works(self.course) if x.cmid == 111)
@@ -43,21 +41,19 @@ class RegistryTest(unittest.TestCase):
         self.assertEqual((w.source, w.assign_id, w.available, w.visible),
                          ("course_contents", None, False, False))
         self.assertEqual(w.due, 1790024340)
-        self.assertIn("НФИбд-01-24", w.reason)               # причина без html-тегов
+        self.assertIn("НФИбд-01-24", w.reason)
         self.assertNotIn("<strong>", w.reason)
         self.assertIn("Доклад по теме лекции 1", w.intro)
         self.assertEqual(w.section, "Доклады")
 
     def test_find_by_number_then_id_then_cmid(self):
         r = self.both()
-        self.assertEqual(r.find(self.course, "1").assign_id, 11)     # номер лабы
+        self.assertEqual(r.find(self.course, "1").assign_id, 11)
         self.assertEqual(r.find(self.course, "lab02").assign_id, 12)
-        self.assertEqual(r.find(self.course, "13").assign_id, 13)    # id, лабы № 13 нет
-        self.assertEqual(r.find(self.course, "115").cmid, 115)       # скрытое — только по cmid
+        self.assertEqual(r.find(self.course, "13").assign_id, 13)
+        self.assertEqual(r.find(self.course, "115").cmid, 115)
 
     def test_find_by_number_of_any_work(self):
-        """Работы бывают не только лабами: у «Решение задачи N ИДЗ» номер тоже должен искаться,
-        причём у такого задания есть только cmid — mod_assign его не отдаёт."""
         self.net.reply("POST", ("mod_assign_get_assignments", "courseids[0]=2"),
                        {"courses": [], "warnings": []})
         self.net.reply("POST", ("core_course_get_contents", "courseid=2"),
@@ -98,12 +94,10 @@ class RegistryTest(unittest.TestCase):
                              soft=lambda where: soft(errors, where))
         works = r.works(self.course)
         self.assertEqual([w.source for w in works], ["assign_api"] * len(works))
-        self.assertTrue(any(w.cmid == 111 for w in works))   # API-задания на месте
+        self.assertTrue(any(w.cmid == 111 for w in works))
         self.assertEqual([e["where"] for e in errors], ["состав курса 1"])
 
     def test_modules_for_digest(self):
-        """Не-assign элементы со сроком строятся тем же конструктором — их берёт сводка;
-        mod_assign для них не нужен."""
         self.net.reply("POST", ("core_course_get_contents", "courseid=1"),
                        fixture("course_contents"))
         r = assigns.Registry(self.m, [self.course.id])

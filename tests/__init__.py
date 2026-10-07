@@ -1,9 +1,3 @@
-"""Тесты: только stdlib (unittest). Запуск из .digest: python3 -m unittest.
-
-Сети в тестах нет: `urllib.request.urlopen` подменён заглушкой, которая падает на любом
-вызове — через `net.send` или в обход него; тесты сетевых модулей ставят поверх `net.send`
-`fakes.FakeNet` с очередью ответов.
-"""
 import pathlib
 import sys
 import urllib.request

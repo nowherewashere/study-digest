@@ -19,9 +19,9 @@ class ConfigTest(unittest.TestCase):
                          "  CODE 5 five\nCODEX=1\nCOURSE 7 seven Старое\nCODE 9\n")
         self.assertEqual(cfg.get("TUIS_URL"), "https://x/")
         self.assertEqual(cfg.ignore(), {1, 2})
-        self.assertEqual(cfg.codes(), {5: "five"})   # CODEX — обычный ключ, CODE 9 — неполная
+        self.assertEqual(cfg.codes(), {5: "five"})
         self.assertEqual(cfg.get("CODEX"), "1")
-        self.assertEqual(cfg.get("COURSE_IGNORE"), "")   # не переменная, а список
+        self.assertEqual(cfg.get("COURSE_IGNORE"), "")
 
     def test_defaults_and_env(self):
         cfg = self.write("")
@@ -59,13 +59,11 @@ class ConfigTest(unittest.TestCase):
         self.assertFalse(self.path.with_name("config.env.tmp").exists())
 
     def test_put_escapes_key(self):
-        # точка в ключе — не «любой символ»: A.B не должен снести строку AXB
         cfg = self.write("AXB=1\nA.B=2\n")
         cfg.put("A.B", "3")
         self.assertEqual(self.path.read_text(encoding="utf-8"), "AXB=1\nA.B=3\n")
 
     def test_write_atomic_replaces_open_permissions(self):
-        # файл с прежними правами 644 подменяется целиком: 600 с момента создания
         self.path.write_text("TUIS_TOKEN=old\n", encoding="utf-8")
         if os.name == "posix":
             self.path.chmod(0o644)
@@ -84,7 +82,7 @@ class ConfigTest(unittest.TestCase):
         cfg = self.write("A=1\nCOURSE_IGNORE=1\nCODE 5 five\nCOURSE 7 x Старое\n# CODE 8 keep\n"
                          "FLOW 5 file\nFLOW 7 release\n")
         self.assertEqual(cfg.flows(), {5: "file", 7: "release"})
-        cfg.write_courses({3}, {5: "five", 8: "eight"})   # без flows — прежние, но только с папкой
+        cfg.write_courses({3}, {5: "five", 8: "eight"})
         self.assertEqual(self.path.read_text(encoding="utf-8"),
                          "A=1\n# CODE 8 keep\nCOURSE_IGNORE=3\nCODE 5 five\nCODE 8 eight\n"
                          "FLOW 5 file\n")

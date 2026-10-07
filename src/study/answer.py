@@ -1,9 +1,3 @@
-"""Заготовка ответа в ТУИС по лабораторной работе — только у курсов с профилем release.
-
-Собирает текст по чек-листу преподавателя: скринкасты из `<код>/tuis/labNN.env`,
-репозитории и релизы — из git-remote и последнего тега. Ничего не отправляет.
-Ни заготовка, ни ссылки в репозиторий курса не попадают: там только сама работа.
-"""
 import pathlib
 
 from . import hosting, local
@@ -14,7 +8,6 @@ TEMPLATE = ("# Ссылки на скринкасты для ответа в Т�
 
 
 def build(cfg, code, num, tag=None):
-    """Текст ответа и список вложений. Нет labNN.env — создаётся пустой."""
     num = local.lab_id(num)
     if local.flow_of(cfg, code) != "release":
         raise StudyError("local", f"{code} сдаётся файлом (FLOW file): "
@@ -37,7 +30,6 @@ def build(cfg, code, num, tag=None):
     tag = tag or local.git(repo, "describe", "--tags", "--abbrev=0")
     val = v["values"]
 
-    # Без заголовков (в Moodle они выходят огромными), незаполненные ссылки не печатаем.
     body = []
     for site, name in local.SITES.items():
         links = [f"  - [{t}]({val[f'{site}_{slot}']})" for slot, t in local.SLOTS.items()
@@ -48,7 +40,6 @@ def build(cfg, code, num, tag=None):
             body += links
     body.append("- Репозиторий и релиз:")
     for cls in hosting.HOSTS.values():
-        # только по remote этого репозитория: GV_REPO/SC_REPO из config.env сюда не подставляем
         slug = local.repo_from_remote(repo, cls.remote, cls.host)
         if slug:
             h = cls(cfg, repo=slug)

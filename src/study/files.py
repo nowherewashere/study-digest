@@ -1,9 +1,3 @@
-"""Файлы курсов из ТУИС: что появилось и как забрать в `<код предмета>/stash/`.
-
-Сводка сообщает, что в курсе появились файлы; забирает их эта команда. Берётся
-не всё подряд: только документы и только до потолка по размеру, иначе в stash
-натечёт то, что там не нужно.
-"""
 import contextlib
 import os
 import pathlib
@@ -21,12 +15,10 @@ MAX_SIZE = 50 * 1024 * 1024
 
 
 def present(into, name):
-    """Файл уже в stash, где бы он там ни лежал: часть материалов разложена по подкаталогам."""
     return next(into.rglob(name), None) if into.is_dir() else None
 
 
 def stash(course):
-    """Каталог материалов курса; у курса без папки его нет — это ошибка конфигурации."""
     if not course.code:
         raise StudyError("config", f"у курса {course.id} нет папки (строки CODE в config.env), "
                                    "забирать файлы некуда")
@@ -34,21 +26,16 @@ def stash(course):
 
 
 def empty(course):
-    """В stash/ курса ещё ничего нет (или его самого нет)."""
     into = stash(course)
     return not into.is_dir() or not any(into.iterdir())
 
 
 def safe(name):
-    """Имя файла из ТУИС — в имя на диске: без разделителей пути, символов, запрещённых
-    на Windows (иначе `--pull` там падает), и без пустого имени."""
     name = re.sub(r'[/\\\x00<>:"|?*]', "_", name or "").strip() or "file"
     return name[:200]
 
 
 def key(module, content):
-    """Файл в снимке — модуль и имя. Не дата: файл, скопированный из прошлогоднего курса,
-    приходит с датой того года и по `timemodified` новым не выглядит."""
     return f"{module.get('id')}/{content.get('filename')}"
 
 
@@ -57,30 +44,25 @@ def is_file(content):
 
 
 def is_link(content):
-    """Ссылка (mod_url): скачивать нечего, но появление стоит заметить."""
     return content.get("type") == "url" and bool(content.get("fileurl"))
 
 
 def label(content):
-    """Имя в списках: файл — как на диске, ссылка — «Название → URL» (URL не чистим)."""
     name = safe(content.get("filename"))
     return f"{name} → {content['fileurl']}" if is_link(content) else name
 
 
 def keys(contents):
-    """Все файлы и ссылки состава курса — что запомнить в снимке."""
     return sorted(key(m, c) for sec in contents for m in sec.get("modules", [])
                   for c in m.get("contents") or [] if is_file(c) or is_link(c))
 
 
 def fresh(module, content, since, known):
-    """Новый: не было в снимке (`known`; None — снимок без состава) или изменён после `since`."""
     return ((known is not None and key(module, content) not in known)
             or (content.get("timemodified") or 0) > (since or 0))
 
 
 def listing(cfg, moodle, course, since=None, everything=False):
-    """Файлы курса; `new` — не было при прошлой сводке или изменился после `since`."""
     state = load_state(cfg)
     if since is None:
         since = state.get("last_run")
@@ -107,11 +89,9 @@ def listing(cfg, moodle, course, since=None, everything=False):
                 size = c.get("filesize") or 0
                 ext = pathlib.Path(name).suffix.lower()
                 have = present(into, name)
-                # перезалитый файл: в ТУИС новее, чем копия на диске (mtime = timemodified)
                 newer = bool(have) and (c.get("timemodified") or 0) > int(have.stat().st_mtime)
                 skip = None
                 if not size:
-                    # mod_page отдаёт index.html с нулевым размером — это страница, не файл
                     skip = "страница курса"
                 elif ext not in DOCS:
                     skip = "тип " + (ext or "без расширения")
@@ -131,8 +111,6 @@ def listing(cfg, moodle, course, since=None, everything=False):
 
 
 class Progress:
-    """Ход загрузки одной строкой на месте — «nettech: 3/12 002-dns.pdf»; вне терминала молчит.
-    Большой курс качается десятки секунд, и без этого кажется, что всё зависло."""
 
     def __init__(self, stream=None):
         self.out = stream or sys.stdout
@@ -150,14 +128,10 @@ class Progress:
 
 
 def wanted(f, force=False):
-    """Качать: прошёл фильтр и (нет на диске, либо в ТУИС новее, либо --force)."""
     return not f["skip"] and (force or not f["have"] or f["newer"])
 
 
 def pull(moodle, data, force=False, progress=None):
-    """Скачивает то, что прошло фильтр и чего нет в stash или что там устарело;
-    `progress(курс, текст)` — ход. Копия ложится на место старой (и в подкаталог, если она там),
-    mtime = timemodified из ТУИС: так «новее» не зависит от часов сервера и машины."""
     label = data["course"]["code"] or data["course"]["id"]
     todo = [f for f in data["files"] if wanted(f, force)]
     got, errors = [], []
@@ -185,7 +159,6 @@ def pull(moodle, data, force=False, progress=None):
 
 
 def walk(cfg, moodle, do_pull=False, everything=False, force=False, progress=None):
-    """По всем курсам с папкой (строки CODE): список файлов каждого, с --pull — и скачивание."""
     for course in (c for c in cfg.track(moodle.courses()) if c.code):
         if progress:
             progress(course.code, "состав курса…")
@@ -194,7 +167,6 @@ def walk(cfg, moodle, do_pull=False, everything=False, force=False, progress=Non
 
 
 def pulled_line(d):
-    """«скачано N, из них обновлено M, не удалось K»."""
     got = d.get("pulled") or []
     upd, bad = sum(1 for g in got if g.get("updated")), len(d.get("errors") or [])
     return (f"скачано {len(got)}" + (f", из них обновлено {upd}" if upd else "")
@@ -202,7 +174,6 @@ def pulled_line(d):
 
 
 def summary(d, pulled=False):
-    """Одна строка на курс для прохода по всем: сколько новых, скачано, пропущено."""
     can = [f for f in d["files"] if wanted(f)]
     label = d["course"]["code"] or d["course"]["id"]
     if pulled:
@@ -211,7 +182,6 @@ def summary(d, pulled=False):
 
 
 def mark(f):
-    """Отметка файла в списке."""
     if f.get("pulled"):
         return "обновлён" if f.get("updated") else "скачан"
     if f["skip"]:
@@ -222,7 +192,6 @@ def mark(f):
 
 
 def render(d, pulled=False):
-    """Список файлов с отметкой: скачан / уже есть / пропущен и почему / можно забрать."""
     out = [f"Курс: {d['course']['title'] or d['course']['id']} · stash: {d['stash']}",
            "Все файлы курса" if d["all"] else
            "Новое — " + ("чего не было при прошлой сводке или " if d.get("tracked") else "")

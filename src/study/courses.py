@@ -1,4 +1,3 @@
-"""Курсы ТУИС: список с отметками и интерактивная настройка COURSE_IGNORE/CODE в config.env."""
 import sys
 import time
 
@@ -6,8 +5,6 @@ from . import local
 from .config import ROOT
 from .fmt import table
 
-# Заготовка заметок по предмету: шапку и таблицы заполняет человек или агент по программе
-# и БРС из stash/. Файл ни при каких условиях не перезаписывается.
 NOTES = """# {title} — заметки
 
 Курс в ТУИС: `{cid}` «{title}». Сдача: {flow}. Преподаватель, формат сдачи, правила —
@@ -34,7 +31,6 @@ FLOW_NOTE = {"release": "релиз репозитория со скринкас
 
 
 def notes_stub(code, cid, title=None, flow=None):
-    """`<код>/NOTES.md`, если его ещё нет: путь созданного файла, иначе None."""
     p = ROOT / code / "NOTES.md"
     if p.exists():
         return None
@@ -50,21 +46,18 @@ def seen(ts):
 
 
 def rows(cfg, moodle, include_hidden=False):
-    """Курсы пользователя с признаками: в игноре, давно не заходил, имя папки."""
     win = cfg.active_days() * 86400
     now = time.time()
     ignore, codes, flows = cfg.ignore(), cfg.codes(), cfg.flows()
     return [{"id": c["id"], "shortname": c.get("shortname"), "title": c["fullname"],
              "lastaccess": c.get("lastaccess") or 0, "code": codes.get(c["id"]),
              "flow": flows.get(c["id"]), "ignored": c["id"] in ignore,
-             # без строки FLOW профиль угадывается: release при репозитории в папке, иначе file
              "guess": local.flow_of(cfg, codes[c["id"]]) if c["id"] in codes else None,
              "stale": not c.get("lastaccess") or now - c["lastaccess"] > win}
             for c in moodle.courses(include_hidden=include_hidden)]
 
 
 def render(rows_):
-    """Таблица курсов и готовая строка COURSE_IGNORE из кандидатов «старый?»."""
     stale = " ".join(str(r["id"]) for r in rows_ if r["stale"] and not r["ignored"])
     return "\n".join([
         table([[str(r["id"]), seen(r["lastaccess"]),
@@ -79,7 +72,6 @@ def render(rows_):
 
 
 def setup(cfg, rows_):
-    """Интерактивно (`study setup`): чекбоксы игнора, затем имя папки на каждый курс."""
     num = {i + 1: r for i, r in enumerate(sorted(rows_, key=lambda r: (r["stale"], r["title"])))}
     ignore_ids = {r["id"] for r in rows_ if r["ignored"]}
     stale_ids = {r["id"] for r in rows_ if r["stale"]}
@@ -95,7 +87,7 @@ def setup(cfg, rows_):
             out.append(f"  {i:2} {box} {seen(r['lastaccess']):>10}  {r['title'][:58]}")
         out.append("   номер - переключить | s - все давно не заходил | Enter/g - готово")
         if prev and sys.stdout.isatty():
-            sys.stdout.write(f"\033[{prev + 1}A\033[J")   # стереть прошлый блок и строку ввода
+            sys.stdout.write(f"\033[{prev + 1}A\033[J")
         sys.stdout.write("\n".join(out) + "\n")
         sys.stdout.flush()
         return len(out)
@@ -115,8 +107,6 @@ def setup(cfg, rows_):
             if tok.isdigit() and int(tok) in num:
                 ignore_ids ^= {num[int(tok)]["id"]}
 
-    # папки и сдача: по каждому отслеживаемому курсу имя (Enter - id курса) и профиль
-    # (Enter - явный из config.env, а без него - release при репозитории в папке, иначе file)
     print("\nИмя локальной папки и сдача (release - релиз репозитория со скринкастами, "
           "file - отчёт файлом) для каждого курса:")
     codes, flows = {}, {}
@@ -126,7 +116,7 @@ def setup(cfg, rows_):
         default = r["code"] or str(r["id"])
         code = input(f"  {r['title'][:50]} [{default}]: ").strip() or default
         codes[r["id"]] = code
-        guess = r["flow"] or local.flow_of(cfg, code)   # папку могли только что назвать
+        guess = r["flow"] or local.flow_of(cfg, code)
         ans = input(f"    сдача, release|file [{guess}]: ").strip().lower()
         flows[r["id"]] = {"r": "release", "f": "file"}.get(ans[:1], guess)
 
@@ -134,7 +124,7 @@ def setup(cfg, rows_):
     titles = {r["id"]: r["title"] for r in rows_}
     notes = []
     for cid, code in codes.items():
-        (ROOT / code / "stash").mkdir(parents=True, exist_ok=True)   # tuis/ заведёт study answer
+        (ROOT / code / "stash").mkdir(parents=True, exist_ok=True)
         if notes_stub(code, cid, titles.get(cid), flows[cid]):
             notes.append(code)
     return {"ignore": sorted(ignore_ids), "code": codes, "flow": flows, "notes": notes}

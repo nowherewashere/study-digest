@@ -1,7 +1,3 @@
-"""Сводка по ТУИС: сбор данных в структуру и рендер.
-
-Данные и рендер разделены: `--json` отдаёт ровно то, что видит рендер, без второго обхода API.
-"""
 import time
 
 from . import files, hosting, local, update
@@ -11,61 +7,51 @@ from .fmt import md_table, moment, plain, short_name, weekday
 from .moodle import PENDING, submission_state
 from .snapshot import load_state, save_state
 
-# Что считаем новостью в core_course_get_updates_since; остальное (submissions, grades,
-# answers) — своя же активность и чужие голоса, то есть шум.
 USEFUL = {"contentfiles", "introfiles", "configuration", "contents", "files"}
 FILES = {"contentfiles", "files", "contents"}
-# Уведомления, которые Moodle шлёт сам: про наши же действия, про сроки (они уже в таблице)
-# и про входы в аккаунт. Отсев по eventtype, а не по теме: тема зависит от языка.
 AUTO_EVENTS = {"assign_due_soon", "assign_due_digest", "assign_notification", "newlogin"}
 DAY = 86400
 URGENT = 2 * DAY
-HOT = 7 * DAY       # «Горит»: несданное, что просрочено или на этой неделе
+HOT = 7 * DAY
 MONTH = 30 * DAY
 
 
 def pending(a):
-    """Работа не сдана: ждёт ответа (не начато, черновик, на доработку), статус неизвестен
-    или ответа в ТУИС нет вовсе (очно) — в просроченное, но не в «Горит»: слать нечего."""
     return a["submission"] in PENDING or a["submission"] in (None, "offline")
 
 
 def news(course, m, section, what):
-    """Строка «Новое в курсах» для модуля курса."""
     return {"course": course, "section": section, "item": m["name"],
             "modname": m.get("modname", ""), "files": [], "links": [], "what": what}
 
 
 def by_due(items):
-    """По сроку; при равных сроках — по курсу и названию, чтобы порядок не зависел от того,
-    в каком порядке ТУИС отдал курсы и задания."""
     return sorted(items, key=lambda x: (x["due"]["ts"], x["course"].get("code") or "",
                                         x["short"]))
 
 
 class Collector:
-    """Один обход ТУИС. Каждый метод — раздел сводки; общее (окно, снимок, курсы) — в атрибутах."""
 
     def __init__(self, cfg, moodle, days, state, errors=()):
         self.moodle = moodle
         self.now = int(time.time())
         self.days = days
         self.horizon = self.now + days * DAY
-        self.since = state.get("last_run")            # None — первый запуск
-        self.known = state.get("assignments", {})     # id задания → срок с прошлого запуска
-        self.graded = state.get("grades")             # {курс: {работа: балл}}; None — нет снимка
-        self.files = state.get("files")               # {курс: [cmid/файл]}; None — нет состава
-        self.seen_courses = state.get("courses")      # {id: название}; None — снимка нет
-        self.fb = state.get("feedback")               # {id задания: отзыв}; None — снимка нет
-        self.announced = state.get("announcements")   # {курс: [id обсуждений]}; None — нет
-        self._forums = {}                             # курс → [id обсуждений], что прочитали
-        self.errors = list(errors)                    # с чем пришёл снимок
+        self.since = state.get("last_run")
+        self.known = state.get("assignments", {})
+        self.graded = state.get("grades")
+        self.files = state.get("files")
+        self.seen_courses = state.get("courses")
+        self.fb = state.get("feedback")
+        self.announced = state.get("announcements")
+        self._forums = {}
+        self.errors = list(errors)
         self.courses = {c.id: c for c in cfg.track(moodle.courses())}
         self.reg = Registry(moodle, soft=self.soft, contents=self.contents)
-        self.ignore = cfg.ignore()   # решение пользователя: этих курсов в сводке нет вовсе
-        self.assigns = {}       # id задания → строка сводки (для снимка)
-        self.raw = {}           # id задания → сырое задание из mod_assign_get_assignments
-        self.asked = set()      # задания, чей статус уже запрошен
+        self.ignore = cfg.ignore()
+        self.assigns = {}
+        self.raw = {}
+        self.asked = set()
         self.soon, self.overdue = [], []
         self._contents = {}
 
@@ -77,7 +63,6 @@ class Collector:
         return c.as_dict() if c else {"id": cid, "code": None, "title": ""}
 
     def contents(self, cid):
-        """Состав курса; неудача запоминается (None), чтобы не ходить и не жаловаться дважды."""
         if cid not in self._contents:
             self._contents[cid] = None
             with self.soft(f"состав курса {cid}"):
@@ -87,21 +72,16 @@ class Collector:
     def within(self, ts):
         return self.now <= ts <= self.horizon
 
-    # --- разделы
 
     def assignments(self):
-        """Задания из mod_assign: сроки в окне и просроченные; новые и сдвинутые — против снимка."""
         new, moved = [], []
         for course in self.courses.values():
-            # состав курса здесь не нужен: задания, которых mod_assign не отдал, добирает
-            # activities() — у них нет ни id, ни состояния ответа, только срок
             for w in self.reg.works(course, contents=False):
                 item = w.as_item(self.now)
                 self.assigns[str(w.assign_id)] = item
                 self.raw[w.assign_id] = w.raw
                 due = w.due or 0
                 prev = self.known.get(str(w.assign_id))
-                # пересдача — не новость: новостью была сама лаба
                 if self.since and prev is None and not item["retake"]:
                     new.append(item)
                 elif prev is not None and due and prev != due:
@@ -118,14 +98,11 @@ class Collector:
             if not item["retake"]:
                 self.status(item)
         self.retakes([a for a in live if a["retake"]])
-        # продление срока преподавателем могло вывести работу из просроченного — пересобрать;
-        # продлённое за горизонт окна уходит из обоих списков, как любой далёкий срок
         self.soon = [a for a in live if self.within(a["due"]["ts"])]
         self.overdue = [a for a in live if a["due"]["ts"] < self.now]
         return new, moved
 
     def status(self, item):
-        """Состояние ответа и оценка из mod_assign_get_submission_status — один раз на задание."""
         if item["assign_id"] in self.asked:
             return
         self.asked.add(item["assign_id"])
@@ -137,19 +114,17 @@ class Collector:
                         locked=s["locked"],
                         opens=moment(s["opens"], self.now) if s["opens"] else None)
             if s["due"] and s["due"] != (item["due"] or {}).get("ts"):
-                item["due"] = moment(s["due"], self.now)   # индивидуальное продление срока
+                item["due"] = moment(s["due"], self.now)
             item["feedback_new"] = bool(item["feedback"]) and self.fb is not None \
                 and self.fb.get(str(item["assign_id"])) != item["feedback"]
 
     def retakes(self, items):
-        """Пересдача нужна, только если оригинал просрочен, не сдан и не оценен; иначе это
-        не срок, а запасной выход, и в сроки она не идёт. Оригинал без пары — считаем нужной."""
         labs = {(a["course"]["id"], a["lab"]): a for a in self.assigns.values() if a["lab"]}
         for r in items:
             orig = labs.get((r["course"]["id"], r["retake"]))
             r["retake_of"] = orig["assign_id"] if orig else None
             if orig:
-                self.status(orig)   # оригинал может быть старше окна — статус ещё не брали
+                self.status(orig)
             r["needed"] = orig is None or (orig["submission"] != "submitted"
                                            and not orig.get("graded")
                                            and (not orig["due"] or orig["due"]["overdue"]
@@ -158,8 +133,6 @@ class Collector:
                 self.status(r)
 
     def activities(self):
-        """Элементы курса со сроками — ловят задания, скрытые ограничением доступа.
-        Статус ответа у них не запросить (requireloginerror), поэтому сразу "hidden"."""
         seen = {a["cmid"] for a in self.assigns.values()}
         others = set(KINDS) - {"assign"}
         for course in self.courses.values():
@@ -168,11 +141,9 @@ class Collector:
             for w in works:
                 if w.due and self.within(w.due):
                     self.soon.append(w.as_item(self.now))
-        # скрытая пересдача сданной лабы — тоже не срок
         self.retakes([a for a in self.soon if a["source"] == "course_contents" and a["retake"]])
 
     def choices(self):
-        """Выбор темы доклада: сам срок ничего не говорит, важно, выбрана ли тема."""
         picks = [a for a in self.soon if a.get("modname") == "choice"]
         if not picks:
             return
@@ -187,15 +158,11 @@ class Collector:
             with self.soft(f"варианты выбора {cid}"):
                 opts = self.moodle.choice_options(cid)
                 mine = [o["text"] for o in opts if o.get("checked")]
-                # disabled — вариант заполнен (maxanswers) или выбор закрыт: его не предлагать
                 a["choice"] = {"chosen": mine[0] if mine else None,
                                "options": sum(1 for o in opts if not o.get("disabled"))}
                 a["submission"] = "submitted" if mine else "new"
 
     def quizzes(self):
-        """Тесты со сроком закрытия на месяц вперёд — отдельный раздел, не «Сроки»;
-        timeclose = 0 — не срок, как duedate = 0 у задания. abandoned-попытки Moodle
-        считает в лимит наравне с finished — здесь тоже."""
         out = []
         with self.soft("тесты"):
             for q in self.moodle.quizzes(list(self.courses)):
@@ -206,8 +173,6 @@ class Collector:
                 with self.soft(f"попытки теста {q['id']}"):
                     tries = self.moodle.quiz_attempts(q["id"])
                 states = [t.get("state") for t in tries or []]
-                # finished — тест сдан, как задание со статусом submitted; inprogress/overdue —
-                # начат, но не отправлен: это важнее срока
                 item = {"kind": "quiz", "source": "quiz", "quiz_id": q["id"],
                         "course": self.course(q["course"]), "name": q["name"],
                         "short": short_name(q["name"]), "due": moment(close, self.now),
@@ -222,9 +187,6 @@ class Collector:
         return by_due(out)
 
     def updates(self):
-        """Что изменилось в курсах: по core_course_get_updates_since и по составу против снимка.
-        Ручка не видит файл, положенный в курс со старой датой (скопирован из прошлогоднего
-        курса) или просто открытый студентам, — такой ловится тем, что в снимке его не было."""
         out = []
         if not self.since:
             return out
@@ -245,7 +207,6 @@ class Collector:
                 m, section = modules.get(u["id"], ({"name": f"(модуль {u['id']})"}, ""))
                 rows[u["id"]] = news(course, m, section,
                                      "новые файлы" if kinds & FILES else "изменены настройки")
-            # имена файлов — чтобы сводка говорила «появился 002-dns.pdf», а не «новые файлы»
             for mid, (m, section) in modules.items():
                 fresh = [c for c in m.get("contents") or []
                          if files.fresh(m, c, self.since, known)]
@@ -260,8 +221,6 @@ class Collector:
         return out
 
     def announcements(self):
-        """Новые записи в форумах объявлений (type news) — против снимка по id, а не по дате:
-        правки и задним числом написанные посты тоже видны. Старый снимок — по времени."""
         out = []
         if not self.since:
             return out
@@ -287,7 +246,6 @@ class Collector:
         return sorted(out, key=lambda a: -a["at"]["ts"])
 
     def notifications(self):
-        """Непрочитанные уведомления, пришедшие после прошлого запуска, без автоматических."""
         out = []
         with self.soft("уведомления"):
             for m in self.moodle.notifications(limit=20):
@@ -297,7 +255,6 @@ class Collector:
         return sorted(out, key=lambda n: -n["at"]["ts"])
 
     def grades(self):
-        """Баллы: итог по курсу и то, что появилось или изменилось с прошлого запуска."""
         out = []
         for cid in self.courses:
             with self.soft(f"оценки, курс {cid}"):
@@ -305,7 +262,7 @@ class Collector:
                     report = self.moodle.grades(cid)
                 except StudyError as e:
                     if e.code == "nopermissiontoviewgrades":
-                        continue   # в курсе выключен показ оценок: настройка, а не сбой
+                        continue
                     raise
                 for t in report:
                     got = [i for i in t.get("gradeitems", [])
@@ -314,7 +271,6 @@ class Collector:
                         continue
                     total = next((i for i in t.get("gradeitems", [])
                                   if i.get("itemtype") == "course"), None)
-                    # Итог курса Moodle может прятать; тогда считаем сумму работ сами.
                     raw = total.get("graderaw") if total else None
                     tot = ({"raw": raw, "max": total["grademax"], "computed": False}
                            if raw is not None else
@@ -331,7 +287,6 @@ class Collector:
         return out
 
     def outside(self):
-        """Сроки по календарю у курсов, скрытых в ТУИС: вдруг скрыт по ошибке. Игнор — нет."""
         events = []
         with self.soft("календарь"):
             events = self.moodle.calendar(self.now - 7 * DAY, self.now + 120 * DAY)
@@ -346,7 +301,6 @@ class Collector:
                              "at": moment(min(e["timesort"] for e in evs), self.now)}}
                 for (cid, name), evs in groups.items()]
 
-    # --- сборка
 
     def run(self):
         new, moved = self.assignments()
@@ -359,19 +313,15 @@ class Collector:
             "first_run": not self.since,
             "since": moment(self.since, self.now) if self.since else None,
             "courses": [c.as_dict() for c in self.courses.values()],
-            # курс, которого не было в снимке: новая запись или снятый игнор
             "new_courses": [c.as_dict() for c in self.courses.values()
                             if self.seen_courses is not None
                             and str(c.id) not in self.seen_courses],
             "deadlines": deadlines,
             "overdue": [a for a in overdue if pending(a)],
             "submitted": [a for a in overdue if not pending(a)],
-            # просроченное и несданное — впереди: пересдача всё ещё стоит баллов; но не то,
-            # что ТУИС уже не примет (приём закрыт) — туда ведёт задание «Пересдача»
             "not_started": [a for a in overdue + deadlines
                             if a["source"] == "assign_api" and a["submission"] in PENDING
                             and not a.get("closed")],
-            # отзывы преподавателя, которых в снимке ещё не было
             "feedback": [a for a in by_due(self.soon + self.overdue) if a.get("feedback_new")],
             "retakes": [{"assign_id": a.get("assign_id"), "cmid": a["cmid"], "short": a["short"],
                          "course": a["course"], "due": a["due"], "retake_of": a["retake_of"],
@@ -386,27 +336,22 @@ class Collector:
         }
 
     def snapshot(self, data):
-        """Что запомнить до следующего запуска."""
         return {
             "last_run": self.now,
-            # исходный срок, не продлённый: иначе продление даст «срок сдвинут» каждый день
             "assignments": {i: self.raw[a["assign_id"]].get("duedate") or 0
                             for i, a in self.assigns.items()},
             "courses": {str(c.id): c.title for c in self.courses.values()},
             "grades": {str(g["course"]["id"]): {i["name"]: i["raw"] for i in g["items"]}
                        for g in data["grades"]},
-            # состав курса не прочитался — оставить прошлый, иначе завтра всё окажется новым
             "files": {str(cid): files.keys(self._contents[cid])
                       if self._contents.get(cid) is not None
                       else (self.files or {}).get(str(cid), [])
                       for cid in self.courses},
-            # объявления: прочитанные форумы дописывают свои id, непрочитанные оставляют прежние
             "announcements": {str(cid): sorted(set((self.announced or {}).get(str(cid), []))
                                                | set(self._forums[cid]))[-50:]
                               if cid in self._forums
                               else (self.announced or {}).get(str(cid), [])
                               for cid in self.courses},
-            # отзывы: статус запрашивался не у всех — прошлые остаются
             "feedback": {**(self.fb or {}),
                          **{str(a["assign_id"]): a["feedback"] for a in self.assigns.values()
                             if a.get("feedback")}},
@@ -414,9 +359,6 @@ class Collector:
 
 
 def collect(cfg, moodle, days=None, save=True, since=None):
-    """Всё, что знает ТУИС: дедлайны, тесты, обновления, уведомления, баллы.
-
-    `since` — что считать прошлым запуском, строка `--since` (см. `snapshot.load_state`)."""
     errors = []
     c = Collector(cfg, moodle, days or cfg.days(), load_state(cfg, since, errors), errors)
     data = c.run()
@@ -425,25 +367,20 @@ def collect(cfg, moodle, days=None, save=True, since=None):
     return data
 
 
-# --- рендер
 
 def attempts(q):
-    """«попыток 1 из 3»; неизвестное число — «?», без предела — «∞»."""
     used = "?" if q["attempts_used"] is None else q["attempts_used"]
     return f"{used} из {q['attempts_max'] or '∞'}"
 
 
 def status_of(a):
-    """Колонка «Состояние» — только по ТУИС. Готовность лабы на диске (`labs[].ready`)
-    остаётся в JSON для сессий над лабой: лаба делается в один заход, в сводке это шум."""
     pick = a.get("choice")
     if pick:
         return ("выбрана: " + pick["chosen"] if pick["chosen"]
                 else f"не выбрана, {pick['options']} вариантов")
     if a["submission"] is None:
-        # статус не получен (ошибка в errors) или элемент без ответа: опрос, взаимная проверка
         return KINDS.get(a.get("modname"), "?") if a["kind"] == "activity" else "?"
-    if a.get("opens") and a["submission"] in PENDING:   # сданному «откроется» ни к чему
+    if a.get("opens") and a["submission"] in PENDING:
         return "откроется " + a["opens"]["text"]
     if a.get("closed"):
         return "заблокировано" if a.get("locked") else "приём закрыт"
@@ -453,7 +390,6 @@ def status_of(a):
 
 
 def label(a):
-    """Курс в таблице: имя папки из config.env, а без него — название из ТУИС."""
     return a["course"]["code"] or a["course"]["title"]
 
 
@@ -466,7 +402,6 @@ def when(m):
 
 
 def repo_trouble(c):
-    """Неполадки репозитория курса — одной строкой, только когда они есть."""
     repo = c["repo"]
     if not repo:
         return None
@@ -483,7 +418,6 @@ def repo_trouble(c):
 
 
 def news_rows(t):
-    """«Новое в курсах»: файлы и настройки, новые задания, сдвинутые сроки."""
     rows = []
     for u in t.get("updates", []):
         if u.get("pulled"):
@@ -507,7 +441,6 @@ def news_rows(t):
 
 
 def deadline_rows(t):
-    """«Сроки»: просроченное жирным, затем окно; сданное не показывается."""
     rows = [bold([a["due"]["text"], "просрочено", a["short"], label(a), status_of(a)])
             for a in t.get("overdue", [])]
     for a in t.get("deadlines", []):
@@ -532,7 +465,6 @@ def grade_rows(t):
 
 
 def quiz_rows(t):
-    """«Тесты»: пройденные не показываются; срочные и начатые, но не отправленные — жирным."""
     rows = []
     for q in t.get("quizzes", []):
         if q["submission"] == "submitted":
@@ -546,7 +478,6 @@ def quiz_rows(t):
 
 
 def hot_line(a):
-    """Строка «Горит»: несданная работа, когда и где методички — без домыслов агента."""
     code = a["course"]["code"]
     left = "просрочено" if a["due"]["overdue"] else a["due"]["left"]
     return (f"- **{a['short']}** · {label(a)} · до {a['due']['text']} · {left} · "
@@ -560,7 +491,6 @@ def outside_rows(t):
 
 
 def render(d):
-    """Готовая сводка в markdown: то, что рутина печатает как есть."""
     t = d.get("tuis") or {}
     now = d["now"]["ts"]
     out = [f"# Учёба · {weekday(now)} {d['now']['text']}"]
@@ -588,8 +518,6 @@ def render(d):
     if trouble:
         out.append("\n" + "; ".join(trouble) + ".")
 
-    # курс без папки: сроки видны, а файлы качать некуда. Строка про новый курс бывает один
-    # раз, поэтому напоминание держится в каждой сводке, пока курс не заведён или не в игноре
     named = {c["id"] for c in t.get("new_courses", [])}
     unset = [c for c in t.get("courses", []) if not c["code"] and c["id"] not in named]
     if unset:
@@ -616,7 +544,6 @@ def render(d):
     if hot:
         out += ["\n## Горит\n"] + [hot_line(a) for a in hot]
     if d.get("errors"):
-        # сбой раздела — не молча: в тексте иначе не видно, чего в сводке не хватает
         out.append("\nНе удалось: " + "; ".join(
             f"{e['source']} · {e['where']} · {e['message'][:80]}" for e in d["errors"]) + ".")
     hints = update.note(d.get("update"))
@@ -626,16 +553,12 @@ def render(d):
 
 
 def render_digest(d):
-    """`study digest`: тот же вид, но без состояния локальных репозиториев."""
     return render({"now": d["now"], "days": d["days"], "tuis": d, "courses": [],
                    "errors": d["errors"]})
 
 
-# --- состояние локальных репозиториев
 
 def pull_updates(cfg, moodle, tuis, errors):
-    """Забрать файлы, о которых сообщила сводка; в каждой строке `updates` пометить скачанное."""
-    # что новое, уже решила сводка (снимок к этому моменту сдвинут на «сейчас») — берём по именам
     for c in tuis["courses"]:
         todo = [u for u in tuis["updates"] if u["files"] and u["course"]["id"] == c["id"]]
         if not todo or not c["code"]:
@@ -653,8 +576,6 @@ def pull_updates(cfg, moodle, tuis, errors):
 
 
 def course_state(cfg, course, by_lab, errors):
-    """Курс на диске: профиль сдачи, а у release — git, релизы на хостингах, лабы с их
-    готовностью и парой в ТУИС. У file-курса репозиторий (если есть) не смотрится."""
     item = {**course.as_dict(), "dir": str(course.dir), "flow": local.flow_of(cfg, course.code),
             "repo": None, "releases": {}, "unreleased_tags": [], "labs": []}
     repo = local.course_repo(course.code) if item["flow"] == "release" else None
@@ -690,7 +611,6 @@ def course_state(cfg, course, by_lab, errors):
 
 
 def state(cfg, moodle, days=None, with_tuis=True, save=True, pull=False, since=None):
-    """Сводка ТУИС плюс состояние локальных репозиториев — всё одним объектом."""
     errors = []
     tuis = None
     if with_tuis:
@@ -698,7 +618,6 @@ def state(cfg, moodle, days=None, with_tuis=True, save=True, pull=False, since=N
         if pull:
             pull_updates(cfg, moodle, tuis, errors)
 
-    # Пара «лаба на диске ↔ задание в ТУИС» — по номеру в названии задания.
     t = tuis or {}
     by_lab = {(a["course"]["code"], a["lab"]): a
               for a in t.get("deadlines", []) + t.get("overdue", []) + t.get("submitted", [])
@@ -707,7 +626,6 @@ def state(cfg, moodle, days=None, with_tuis=True, save=True, pull=False, since=N
     courses = [course_state(cfg, Course(cid, code, titles.get(cid, "")), by_lab, errors)
                for cid, code in cfg.codes().items()]
 
-    # Есть ли обновление самого инструмента и актуальны ли блоки агента — только подсказка
     upd = None
     with soft(errors, "обновление study"):
         upd = update.check()

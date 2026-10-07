@@ -1,11 +1,3 @@
-"""Первоначальная настройка: токены, каталоги, проверка связи, ИИ-оператор, курсы.
-
-Продолжение install.py (тот ставит код и зовёт `study setup`), но работает и сам по себе —
-перенастроить токены, оператора или курсы. Каждый шаг — свой экран: [n/N] в заголовке,
-строка прогресса, снизу — результат; всё, что шаги сообщили, собирается и показывается
-ещё раз на итоговом экране. Шаги, уже сделанные install.py, и их результаты приходят
-в переменной STUDY_SETUP (JSON: {"steps": [...], "log": [[ok|warn, шаг, текст], ...]}).
-"""
 import contextlib
 import ctypes
 import getpass
@@ -22,7 +14,7 @@ import webbrowser
 
 try:
     import winreg
-except ImportError:   # не Windows
+except ImportError:
     winreg = None
 
 from . import agent, courses, files, local
@@ -33,7 +25,7 @@ from .snapshot import load_state
 STEPS = ["Токены", "Каталоги", "Проверка", "Оператор", "Курсы"]
 RULE = "-" * 72
 POSIX = os.name == "posix"
-TOKENS = [   # ключ в config.env, название, где взять, страница токена относительно TUIS_URL
+TOKENS = [
     ("TUIS_TOKEN", "Moodle (нужен для сводки)",
      "профиль -> Ключи безопасности -> служба Moodle mobile web service", "/user/managetoken.php"),
     ("GITVERSE_TOKEN", "GitVerse (необязательно)",
@@ -55,7 +47,6 @@ NEXT = """
   в Instructions - текст из {prompt}"""
 
 
-# --- оформление: цвета только в терминале, без них — тот же текст
 
 class Screen:
     def __init__(self, steps, log=()):
@@ -66,7 +57,6 @@ class Screen:
             if self.tty else ("",) * 6)
 
     def step(self, n):
-        """Новый экран: заголовок [n/N], строка прогресса, черта."""
         self.n = n
         crumbs = []
         for i, name in enumerate(self.steps, 1):
@@ -101,7 +91,6 @@ class Screen:
         return getpass.getpass(prompt)
 
     def final(self, root, prompt):
-        """Итоговый экран: всё, что сообщили шаги, и что делать дальше."""
         self.steps.append("Готово")
         self.step(len(self.steps))
         mark = {"ok": f"{self.G}+{self.N}", "warn": f"{self.Y}!{self.N}"}
@@ -110,18 +99,15 @@ class Screen:
 
 
 def yes(answer, default):
-    """[Y/n] и [y/N]: пустой ввод — значение по умолчанию."""
     return (answer.strip() or default)[:1].lower() == "y"
 
 
-# --- платформа: браузер, команда в PATH
 
 def wsl():
     return "microsoft" in platform.uname().release.lower()
 
 
 def open_url(url):
-    """Открыть ссылку в браузере, не роняя установку; False — не вышло, пусть откроют руками."""
     if wsl():
         opener = shutil.which("wslview") or shutil.which("explorer.exe")
         if not opener:
@@ -130,7 +116,7 @@ def open_url(url):
         return True
     if sys.platform.startswith("linux") and not (os.environ.get("DISPLAY")
                                                  or os.environ.get("WAYLAND_DISPLAY")):
-        return False   # без графики webbrowser поднимет lynx/w3m прямо в терминале
+        return False
     return webbrowser.open(url)
 
 
@@ -139,8 +125,6 @@ def bin_dir():
 
 
 def link_command():
-    """Команда study в ~/.local/bin: симлинк на POSIX; на Windows — study.cmd для cmd и
-    PowerShell и sh-скрипт study для Git Bash, оба зовут этот же python с лаунчером."""
     launcher, b = HERE / "study", bin_dir()
     b.mkdir(parents=True, exist_ok=True)
     if POSIX:
@@ -150,7 +134,6 @@ def link_command():
         link.symlink_to(launcher)
         return f"~/.local/bin/study -> {launcher}"
     py = pathlib.Path(sys.executable)
-    # cmd читает .cmd в OEM-кодировке: пути под профилем пишем через %USERPROFILE%
     home = re.escape(str(pathlib.Path.home()))
     cmd = re.sub(home, "%USERPROFILE%", f'@"{py}" "{launcher}" %*\r\n', flags=re.IGNORECASE)
     try:
@@ -164,7 +147,6 @@ def link_command():
 
 
 def user_path():
-    """PATH пользователя из реестра Windows: (значение, тип) — тип нужен, чтобы записать так же."""
     with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as k:
         try:
             return winreg.QueryValueEx(k, "Path")
@@ -173,19 +155,16 @@ def user_path():
 
 
 def in_path(b):
-    """Каталог уже в PATH: текущем или, на Windows, в PATH пользователя из реестра."""
     def norm(p):
         return os.path.normcase(os.path.normpath(os.path.expandvars(p.strip())))
     seen = [norm(p) for p in os.environ.get("PATH", "").split(os.pathsep) if p.strip()]
     if winreg:
-        with contextlib.suppress(OSError):   # реестр недоступен — значит, и в PATH нет
+        with contextlib.suppress(OSError):
             seen += [norm(p) for p in user_path()[0].split(";") if p.strip()]
     return norm(str(b)) in seen
 
 
 def add_user_path(b):
-    """Дописать каталог в PATH пользователя (HKCU\\Environment) и оповестить систему.
-    setx не годится: обрезает значение на 1024 символах и меняет его тип."""
     value, kind = user_path()
     with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0, winreg.KEY_SET_VALUE) as k:
         winreg.SetValueEx(k, "Path", 0, kind, (value.rstrip(";") + ";" if value else "") + str(b))
@@ -193,7 +172,6 @@ def add_user_path(b):
 
 
 def path_hint(s):
-    """Команда лежит в ~/.local/bin — но есть ли он в PATH."""
     b = bin_dir()
     if in_path(b):
         return
@@ -213,7 +191,6 @@ def path_hint(s):
         s.warn(f"добавь {b} в PATH пользователя (Параметры -> Переменные среды)")
 
 
-# --- шаги
 
 def ask_token(s, cfg, key, name, where, url):
     short = name.split()[0]
@@ -233,7 +210,6 @@ def ask_token(s, cfg, key, name, where, url):
     cfg.put(key, token)
     s.ok(f"{short}: сохранён в config.env")
     if key == "TUIS_TOKEN" and not re.fullmatch(r"[0-9a-f]{32}", token):
-        # у Moodle токен — 32 hex; в скрытый ввод легко вставить дважды
         s.warn(f"{short}: токен не похож на 32 hex-символа ({len(token)}) — не вставлен ли дважды?")
 
 
@@ -259,9 +235,9 @@ def dirs(s, cfg):
     state.mkdir(parents=True, exist_ok=True)
     s.ok(f"снимок состояния сводки: {state}")
     codes = cfg.codes()
-    titles = load_state(cfg).get("courses") or {}   # сети на этом шаге нет — названия из снимка
+    titles = load_state(cfg).get("courses") or {}
     for cid, code in codes.items():
-        (ROOT / code / "stash").mkdir(parents=True, exist_ok=True)   # tuis/ заведёт study answer
+        (ROOT / code / "stash").mkdir(parents=True, exist_ok=True)
         made = courses.notes_stub(code, cid, titles.get(str(cid)), local.flow_of(cfg, code))
         s.ok(f"{ROOT / code}{os.sep}{{stash" + (",NOTES.md}" if made else "}"))
     if not codes:
@@ -314,7 +290,6 @@ def courses_(s, cfg, m):
     print("config.env обновлён: COURSE_IGNORE ({}), CODE ({})".format(
         len(out["ignore"]), len(out["code"])))
     s.ok(f"записаны в config.env: {len(out['code'])} папок")
-    # сводка тянет только новое с прошлого запуска, поэтому первое наполнение - отдельно
     print()
     if not yes(s.ask("скачать материалы всех курсов в stash/ сейчас? [Y/n]"), "y"):
         s.note("позже: study files --pull")
@@ -332,17 +307,15 @@ def courses_(s, cfg, m):
 
 
 def resume():
-    """Шаги, уже сделанные install.py, и их результаты — из STUDY_SETUP."""
     raw = os.environ.get("STUDY_SETUP")
     d = json.loads(raw) if raw else {}
     return list(d.get("steps") or []), [list(x) for x in d.get("log") or []]
 
 
 def run(cfg):
-    """Все шаги по очереди; вернуть лог и текст итогового экрана."""
     done, log = resume()
     s = Screen(done + STEPS, log)
-    m = Moodle(cfg)   # токен читается лениво — уже после шага «Токены»
+    m = Moodle(cfg)
     plan = [lambda: tokens(s, cfg), lambda: dirs(s, cfg), lambda: check(s, m),
             lambda: operator(s), lambda: courses_(s, cfg, m)]
     for i, fn in enumerate(plan, len(done) + 1):

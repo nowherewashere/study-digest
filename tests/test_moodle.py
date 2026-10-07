@@ -22,12 +22,11 @@ class MoodleTest(unittest.TestCase):
         req = self.net.sent[0]
         self.assertEqual(req["url"], SERVER)
         self.assertEqual(req["headers"]["Content-Type"], "application/x-www-form-urlencoded")
-        # массивы кодируются по-Moodle, токен и формат — в каждой форме
         self.assertEqual(req["form"], {"wstoken": "test-token", "moodlewsrestformat": "json",
                                        "wsfunction": "mod_quiz_get_quizzes_by_courses",
                                        "courseids[0]": "1", "courseids[1]": "2"})
         self.assertEqual((req["where"], req["retries"]),
-                         ("mod_quiz_get_quizzes_by_courses", net.RETRIES))   # чтение — с повторами
+                         ("mod_quiz_get_quizzes_by_courses", net.RETRIES))
 
     def test_call_skips_none_and_empty_list(self):
         self.net.reply("POST", "core_calendar_get_action_events_by_timesort", {"events": []})
@@ -52,7 +51,7 @@ class MoodleTest(unittest.TestCase):
     def test_me_cached_and_functions(self):
         self.net.reply("POST", "core_webservice_get_site_info", fixture("site_info"))
         self.assertEqual(self.m.me()["userid"], 100)
-        self.assertEqual(self.m.functions()[0], "core_course_get_contents")   # без сети: кэш
+        self.assertEqual(self.m.functions()[0], "core_course_get_contents")
         self.assertEqual(len(self.net.sent), 1)
 
     def test_courses_hidden(self):
@@ -88,7 +87,6 @@ class MoodleTest(unittest.TestCase):
         self.assertEqual((first["timesortfrom"], first["timesortto"], first["limitnum"]),
                          ("100", "200", str(PAGE)))
         self.assertNotIn("aftereventid", first)
-        # вторая страница — курсором, окно то же: события с равным timesort на границе целы
         self.assertEqual(second["aftereventid"], "1050")
         self.assertEqual((second["timesortfrom"], second["timesortto"]), ("100", "200"))
         boundary = [e["id"] for e in events if e["timesort"] == events[-3]["timesort"]]
@@ -145,7 +143,7 @@ class MoodleTest(unittest.TestCase):
         self.assertEqual(first["fields"], {"token": "test-token", "filearea": "draft",
                                            "itemid": "0"})
         self.assertEqual(first["files"], {"file_1": ("a.pdf", b"AAA", "application/octet-stream")})
-        self.assertEqual(second["fields"]["itemid"], "77")   # второй файл — в тот же itemid
+        self.assertEqual(second["fields"]["itemid"], "77")
         self.assertEqual(second["files"]["file_1"][:2], ("b.zip", b"BB"))
         self.assertEqual(first["timeout"], 900)
         self.net.reply("POST", "/webservice/upload.php", {"error": "File is too large",
@@ -157,7 +155,7 @@ class MoodleTest(unittest.TestCase):
     def test_save_submission(self):
         self.net.reply("POST", "mod_assign_save_submission", [])
         self.m.save_submission(11, "# Ответ", itemid=77)
-        self.assertEqual(self.net.sent[-1]["retries"], 0)   # необратимо — без повторов
+        self.assertEqual(self.net.sent[-1]["retries"], 0)
         form = self.net.calls("mod_assign_save_submission")[0]
         self.assertEqual({k: v for k, v in form.items() if k.startswith(("assign", "plugin"))},
                          {"assignmentid": "11", "plugindata[onlinetext_editor][text]": "# Ответ",
@@ -189,7 +187,7 @@ class AcceptsTest(unittest.TestCase):
         self.assertEqual(accepts(assignment(12)),
                          {"files": {"enabled": True, "max": 20, "max_bytes": None, "types": []},
                           "text": {"enabled": False, "words": None}})
-        self.assertIsNone(accepts(assignment(13)))   # configs нет — не проверяем
+        self.assertIsNone(accepts(assignment(13)))
         self.assertEqual(accepts_line(accepts(assignment(11))),
                          "текст — да, до 500 слов · файлы — до 2, типы .pdf, до 10 МБ")
         self.assertEqual(accepts_line(accepts(assignment(21))),
@@ -213,9 +211,8 @@ class AcceptsTest(unittest.TestCase):
         self.assertEqual(check_submission(accepts(assignment(12)), "x", [self.tmp / "нет.pdf"]),
                          ["нет файла " + str(self.tmp / "нет.pdf"),
                           "текст ответа в задании выключен — только файлы"])
-        # группа типов Moodle (document) не разворачивается — расширение не проверяется
         self.assertEqual(check_submission(accepts(assignment(21)), None, [zip_]), [])
-        self.assertEqual(check_submission(None, None, [zip_]), [])   # настроек нет — пропускаем
+        self.assertEqual(check_submission(None, None, [zip_]), [])
 
 
 class GradeOfTest(unittest.TestCase):
@@ -239,7 +236,6 @@ class AssignsTest(unittest.TestCase):
         self.assertIn("id=11 cmid=111", text)
 
     def test_contents_failure_does_not_kill_list(self):
-        """Состав курса — добавка к mod_assign: его сбой не должен уносить весь список."""
         tmp = tmpdir(self)
         net_ = FakeNet().install(self)
         net_.reply("POST", ("mod_assign_get_assignments", "courseids[0]=1"),
@@ -265,7 +261,6 @@ class AssignsTest(unittest.TestCase):
         self.assertIn("в курсе rel-db заданий нет", text)
 
     def test_course_title_falls_back_to_code(self):
-        """Название даёт mod_assign; у курса, которого он не вернул, его взять неоткуда."""
         tmp = tmpdir(self)
         net_ = FakeNet().install(self)
         net_.reply("POST", ("mod_assign_get_assignments", "courseids[0]=9"),
@@ -281,8 +276,6 @@ class AssignsTest(unittest.TestCase):
         self.assertIn("[9] markov", text)
 
     def test_hidden_rows_when_course_known(self):
-        """С указанным курсом виден и состав курса: задания, которых mod_assign не отдал,
-        печатаются строками с причиной, а не счётчиком «Скрыто ограничением доступа»."""
         tmp = tmpdir(self)
         net_ = FakeNet().install(self)
         net_.reply("POST", ("mod_assign_get_assignments", "courseids[0]=1"),
@@ -307,7 +300,6 @@ class SubmitTest(unittest.TestCase):
         self.pdf.write_bytes(b"%PDF" * 300)
 
     def submit(self, status="new", assignments=None, **kw):
-        """Один вызов cmd_submit: ответы на задания и статус ставятся на каждый вызов."""
         args = argparse.Namespace(assign_id=11, text=None, attach=None, files=None, confirm=False)
         vars(args).update(kw)
         self.net.drop("mod_assign_get_assignments")
@@ -326,14 +318,11 @@ class SubmitTest(unittest.TestCase):
         return d
 
     def test_unknown_assign_id_refused(self):
-        """id, которого нет в mod_assign (часто это cmid из сводки или закрытое задание):
-        отказ до похода за статусом, иначе Moodle ответит невнятной ошибкой."""
         args = argparse.Namespace(assign_id=115, text=None, attach=None, files=None, confirm=True)
         self.net.reply("POST", "mod_assign_get_assignments", fixture("assignments"))
         plan, _text, rc = cli.cmd_submit(self.cfg, args)
         self.assertEqual(rc, 1)
         self.assertIn("задание id 115 не найдено", " ".join(plan["problems"]))
-        # форма плана та же, что у обычной отправки: потребитель --json читает те же ключи
         self.assertEqual((plan["attach"], plan["text_chars"], plan["drafts"], plan["statement"],
                           plan["files_itemid"], plan["text_file"]),
                          ([], 0, False, False, None, None))
@@ -379,7 +368,6 @@ class SubmitTest(unittest.TestCase):
         self.assertIn("вложения: itemid 77 (состав по itemid не виден, не проверяется)", text)
 
     def test_closed_locked_graded_opens_offline(self):
-        # приём закрыт: cutoff = срок (13), canedit false
         plan, text, rc = self.submit(assign_id=13, status="closed", attach=[str(self.pdf)])
         why = (f"приём закрыт {fmt.moment(1789160340)['full']} — нужна «Пересдача …» или "
                "разрешение преподавателя")
@@ -412,14 +400,13 @@ class SubmitTest(unittest.TestCase):
         self.assertEqual((plan["drafts"], plan["statement"], plan["submitted"]), (True, True, []))
         form = self.net.calls("mod_assign_submit_for_grading")[0]
         self.assertEqual((form["assignmentid"], form["acceptsubmissionstatement"]), ("11", "1"))
-        self.assertEqual(self.net.sent[-1]["retries"], 0)   # необратимо — без повторов
+        self.assertEqual(self.net.sent[-1]["retries"], 0)
         self.assertTrue(text.startswith("Отправлено"))
         _, text, _ = self.submit(assignments=self.assignment(11, submissiondrafts=1),
                                  attach=[str(self.pdf)])
         self.assertIn("после сохранения: отправка на проверку (submissiondrafts=1)\n", text)
 
     def test_warning_is_error(self):
-        # отказ Moodle приходит как HTTP 200 и warnings — «Отправлено» печатать нельзя
         self.net.reply("POST", "/webservice/upload.php", [{"itemid": 77, "filename": "report.pdf"}])
         self.net.reply("POST", "mod_assign_save_submission",
                        [{"item": "The due date for this assignment has now passed", "itemid": 11,
@@ -439,7 +426,7 @@ class SubmissionStateTest(unittest.TestCase):
         a = {"duedate": now - 100, "cutoffdate": now - 100, "allowsubmissionsfromdate": 0}
         s = submission_state(a, new, now)
         self.assertEqual((s["status"], s["closed"], s["graded"], s["due"], s["cutoff"]),
-                         ("new", False, False, now - 100, now - 100))   # canedit true — открыто
+                         ("new", False, False, now - 100, now - 100))
         s = submission_state(a, fixture("submission_status_closed"), now)
         self.assertEqual((s["status"], s["closed"], s["canedit"]), ("new", True, False))
         s = submission_state({**a, "teamsubmission": 1}, fixture("submission_status_team"), now)
@@ -447,7 +434,7 @@ class SubmissionStateTest(unittest.TestCase):
         s = submission_state({**a, "nosubmissions": 1}, new, now)
         self.assertEqual((s["status"], s["closed"]), ("offline", False))
         graded = fixture("submission_status_submitted")
-        graded["lastattempt"]["submission"]["status"] = "new"   # очная защита оценена без файла
+        graded["lastattempt"]["submission"]["status"] = "new"
         s = submission_state({**a, "nosubmissions": 1}, graded, now)
         self.assertEqual((s["status"], s["graded"], s["grade"]), ("submitted", True, "9.50000"))
         ext = fixture("submission_status_closed")
@@ -456,12 +443,11 @@ class SubmissionStateTest(unittest.TestCase):
         self.assertEqual((s["due"], s["cutoff"], s["closed"]), (now + 500, now + 500, False))
         s = submission_state({**a, "allowsubmissionsfromdate": now + 9}, ext, now)
         self.assertEqual(s["opens"], now + 9)
-        # сдано (оценено очно) и приём откроется позже: причина отказа — оценка, не «откроется»
         s = submission_state({**a, "allowsubmissionsfromdate": now + 9}, graded, now)
         s["canedit"] = False
         self.assertEqual(check_state(s, str)[0][:21], "уже оценено (9.50000)")
-        s["grade"] = None   # graded, но балла нет (marking workflow) — без «(None)»
+        s["grade"] = None
         self.assertEqual(check_state(s, str)[0][:13], "уже оценено —")
-        s = submission_state({}, {}, now)   # статус не получен: ничего не утверждаем
+        s = submission_state({}, {}, now)
         self.assertEqual((s["status"], s["canedit"], s["closed"], s["due"]),
                          ("new", None, False, None))

@@ -7,7 +7,7 @@ from study.config import Course, StudyError
 from study.moodle import Moodle
 from tests.fakes import DAY, NOW, FakeNet, config, fixture, git, patch, repo, tmpdir
 
-SINCE = NOW - DAY   # 002-dns.pdf, video.mp4, big.zip в фикстурах изменены 2 часа назад
+SINCE = NOW - DAY
 
 
 class FilesTest(unittest.TestCase):
@@ -24,13 +24,13 @@ class FilesTest(unittest.TestCase):
 
     def test_listing_filters(self):
         (self.stash / "old").mkdir(parents=True)
-        (self.stash / "old" / "lecture-01.pptx").write_bytes(b"x")   # уже есть, в подкаталоге
+        (self.stash / "old" / "lecture-01.pptx").write_bytes(b"x")
         d = files.listing(self.cfg, self.m, self.course, since=SINCE, everything=True)
         self.assertEqual((d["course"]["code"], d["stash"], d["since"]["ts"]),
                          ("nettech", str(self.stash), SINCE))
         rows = {f["name"]: f for f in d["files"]}
         self.assertEqual([f["name"] for f in d["files"]][:3],
-                         ["002-dns.pdf", "video.mp4", "big.zip"])   # свежие первыми
+                         ["002-dns.pdf", "video.mp4", "big.zip"])
         self.assertEqual({n: (f["skip"], f["have"], f["new"]) for n, f in rows.items()},
                          {"002-dns.pdf": (None, False, True),
                           "video.mp4": ("тип .mp4", False, True),
@@ -52,7 +52,6 @@ class FilesTest(unittest.TestCase):
         self.assertIn("пропущен: ссылка Ссылка → https://example.org/", text)
 
     def test_listing_by_snapshot(self):
-        # старый файл, которого не было при прошлой сводке, — новый, дата не в счёт
         self.cfg.state_file().write_text(json.dumps(
             {"last_run": SINCE, "files": {"1": ["121/002-dns.pdf", "122/video.mp4"]}}),
             encoding="utf-8")
@@ -64,7 +63,7 @@ class FilesTest(unittest.TestCase):
         self.assertIn("чего не было при прошлой сводке", files.render(d))
 
     def test_listing_since_from_state(self):
-        d = files.listing(self.cfg, self.m, self.course)   # снимка нет — новым считается всё
+        d = files.listing(self.cfg, self.m, self.course)
         self.assertIsNone(d["since"])
         self.assertEqual(len(d["files"]), 6)
         self.assertIn("после начала времён", files.render(d))
@@ -74,7 +73,7 @@ class FilesTest(unittest.TestCase):
     def test_pull(self):
         self.stash.mkdir(parents=True)
         (self.stash / "lecture-01.pptx").write_bytes(b"old")
-        os.utime(self.stash / "lecture-01.pptx", (NOW, NOW))   # копия свежее, чем в ТУИС
+        os.utime(self.stash / "lecture-01.pptx", (NOW, NOW))
         d = files.listing(self.cfg, self.m, self.course, since=SINCE, everything=True)
         self.net.reply("GET", "002-dns.pdf?forcedownload=1&token=test-token", b"%PDF-2")
         out = files.pull(self.m, d)
@@ -82,7 +81,7 @@ class FilesTest(unittest.TestCase):
                                           "path": str(self.stash / "002-dns.pdf")}])
         self.assertEqual((self.stash / "002-dns.pdf").read_bytes(), b"%PDF-2")
         self.assertEqual(int((self.stash / "002-dns.pdf").stat().st_mtime), 1789531200)
-        self.assertEqual((self.stash / "lecture-01.pptx").read_bytes(), b"old")   # без force
+        self.assertEqual((self.stash / "lecture-01.pptx").read_bytes(), b"old")
         self.assertEqual(out["errors"], [])
         text = files.render(out, pulled=True)
         self.assertIn("скачан       002-dns.pdf", text)
@@ -91,7 +90,6 @@ class FilesTest(unittest.TestCase):
         self.assertIn(f"В {self.stash}: скачано 1", text)
 
     def test_pull_refreshes_newer(self):
-        # копия в подкаталоге старее, чем в ТУИС (перезалили) — перекачать на место, без --force
         old = self.stash / "old" / "lecture-01.pptx"
         old.parent.mkdir(parents=True)
         old.write_bytes(b"old")
@@ -100,14 +98,14 @@ class FilesTest(unittest.TestCase):
         row = next(f for f in d["files"] if f["name"] == "lecture-01.pptx")
         self.assertTrue(row["newer"])
         self.assertIn("есть, в ТУИС новее lecture-01.pptx", files.render(d))
-        self.assertEqual(files.summary(d), "nettech: 2 к загрузке")   # 002-dns.pdf и она
+        self.assertEqual(files.summary(d), "nettech: 2 к загрузке")
         self.net.reply("GET", "002-dns.pdf?forcedownload=1&token=test-token", b"%PDF-2")
         self.net.reply("GET", "lecture-01.pptx?token=test-token", b"new")
         out = files.pull(self.m, d)
         self.assertEqual([(g["name"], g["updated"]) for g in out["pulled"]],
                          [("002-dns.pdf", False), ("lecture-01.pptx", True)])
         self.assertEqual((old.read_bytes(), int(old.stat().st_mtime)), (b"new", 1789279200))
-        self.assertFalse((self.stash / "lecture-01.pptx").exists())   # не вторая копия наверху
+        self.assertFalse((self.stash / "lecture-01.pptx").exists())
         text = files.render(out, pulled=True)
         self.assertIn("обновлён     lecture-01.pptx", text)
         self.assertIn("скачано 2, из них обновлено 1", text)
@@ -130,7 +128,7 @@ class FilesTest(unittest.TestCase):
 class SafeNameTest(unittest.TestCase):
     def test_safe(self):
         self.assertEqual(files.safe("../a/b\\c.pdf"), ".._a_b_c.pdf")
-        self.assertEqual(files.safe('Лекция 1: "введение" <v2>?.pdf'),   # запрещено на Windows
+        self.assertEqual(files.safe('Лекция 1: "введение" <v2>?.pdf'),
                          "Лекция 1_ _введение_ _v2__.pdf")
         self.assertEqual(files.safe(None), "file")
         self.assertEqual(len(files.safe("x" * 300)), 200)
@@ -189,7 +187,7 @@ class AnswerTest(unittest.TestCase):
     def test_tag_and_remote_only(self):
         self.env.parent.mkdir(parents=True)
         self.env.write_text("", encoding="utf-8")
-        git(self.repo, "remote", "remove", "src")   # SC_REPO из config.env не подставляется
+        git(self.repo, "remote", "remove", "src")
         d = answer.build(self.cfg, "nettech", "1", tag="v1.0.0")
         self.assertEqual(d["text"], "- Репозиторий и релиз:\n"
                                     "  - [gitverse](https://gitverse.ru/me/nettech), "
@@ -199,21 +197,19 @@ class AnswerTest(unittest.TestCase):
 
     def test_errors(self):
         with self.assertRaises(StudyError) as e:
-            answer.build(self.cfg, "nettech", "hw1")   # домашних нет: только labNN
+            answer.build(self.cfg, "nettech", "hw1")
         self.assertIn("ожидается номер лабораторной", e.exception.message)
         with self.assertRaises(StudyError) as e:
             answer.build(self.cfg, "nettech", "2")
         self.assertIn(str(self.repo / "labs" / "lab02"), e.exception.message)
         with self.assertRaises(StudyError) as e:
-            answer.build(self.cfg, "nope", "1")   # репозитория нет → профиль file
+            answer.build(self.cfg, "nope", "1")
         self.assertIn("nope сдаётся файлом (FLOW file): study submit <id> --attach nope/lab01/",
                       e.exception.message)
-        # явный FLOW release без клона — прежняя ошибка про репозиторий
         cfg = config(self.tmp, "CODE 7 nope\nFLOW 7 release\n")
         with self.assertRaises(StudyError) as e:
             answer.build(cfg, "nope", "1")
         self.assertIn("не найден репозиторий", e.exception.message)
-        # явный FLOW file при живом репозитории — answer не нужен
         cfg = config(self.tmp, "CODE 1 nettech\nFLOW 1 file\n")
         with self.assertRaises(StudyError) as e:
             answer.build(cfg, "nettech", "1")

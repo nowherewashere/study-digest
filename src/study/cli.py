@@ -1,8 +1,3 @@
-"""Разбор команд и вывод. Каждая команда возвращает (данные, текст[, код возврата]).
-
-`--json` печатает данные, без него — текст. Ошибка StudyError печатается в stderr
-с подсказкой, если она известна, и даёт код возврата 2.
-"""
 import argparse
 import json
 import pathlib
@@ -18,7 +13,6 @@ from .rutube import DEFAULT_CATEGORY, Rutube
 
 
 def course_of(cfg, value):
-    """Курс по id или имени папки (строка CODE в config.env)."""
     codes = cfg.codes()
     if str(value).isdigit():
         return Course(int(value), codes.get(int(value)))
@@ -33,7 +27,6 @@ def read_text(path):
 
 
 def kv(pairs):
-    """k=v из командной строки; повтор ключа собирается в список для массивов Moodle."""
     out = {}
     for item in pairs:
         key, _, value = item.partition("=")
@@ -44,7 +37,6 @@ def kv(pairs):
     return out
 
 
-# --- ТУИС
 
 def cmd_me(cfg, args):
     d = Moodle(cfg).me()
@@ -76,21 +68,15 @@ def cmd_call(cfg, args):
 
 
 def assign_line(w, due):
-    """Строка задания; у скрытого ограничением нет id — только cmid и причина из ТУИС."""
     head = f"  id={w.assign_id} cmid={w.cmid}" if w.available else f"  cmid={w.cmid}"
     line = "{} до {}  {}".format(head, due["text"] if due else "—", w.name)
     if w.available:
         return line
-    # причина из Moodle бывает на полстроки («Глобальная группа … 2026/2027 уч. год …») —
-    # в списке нужен признак, целиком её показывает `study task`
     return line + ("  — доступ закрыт: " + plain(w.reason, 60) if w.reason
                    else "  — доступ закрыт")
 
 
 def cmd_assigns(cfg, args):
-    """С указанным курсом читается и состав курса — там задания, которых mod_assign не отдаёт;
-    без курса берётся только mod_assign: состав пришлось бы спрашивать по каждому курсу.
-    Состав — добавка, поэтому его сбой не уносит список: он уходит в «Не удалось»."""
     course = course_of(cfg, args.course) if args.course else None
     errors = []
     reg = assigns.Registry(Moodle(cfg), [course.id] if course else None,
@@ -107,7 +93,7 @@ def cmd_assigns(cfg, args):
             rows.append({"course": {"id": c.id, "title": title},
                          "assign_id": w.assign_id, "cmid": w.cmid, "name": w.name, "due": due,
                          "source": w.source, "available": w.available, "reason": w.reason,
-                         "intro": plain(w.intro, 2000)})   # текст задания — только в JSON
+                         "intro": plain(w.intro, 2000)})
             lines.append(assign_line(w, due))
     if course and not rows:
         lines.append(f"в курсе {course.code or course.id} заданий нет: "
@@ -133,7 +119,6 @@ def cmd_calendar(cfg, args):
 
 
 def named(cfg, m, value):
-    """Курс по id или папке — с названием из ТУИС, если он там есть."""
     c = course_of(cfg, value)
     return next((t for t in cfg.track(m.courses()) if t.id == c.id), c)
 
@@ -165,12 +150,10 @@ def cmd_grades(cfg, args):
 
 
 def cmd_files(cfg, args):
-    """Один курс — подробный список; без курса — все папки из config.env, по строке на курс."""
     m = Moodle(cfg)
     progress = files.Progress()
     if args.course:
         course = named(cfg, m, args.course)
-        # в пустую stash/ забираем всё: сравнивать «новое с прошлого запуска» не с чем
         d = files.listing(cfg, m, course, everything=args.all or files.empty(course))
         if args.pull:
             d = files.pull(m, d, force=args.force, progress=progress)
@@ -201,7 +184,6 @@ def cmd_upload(cfg, args):
 
 
 def unknown_assign(args, text, attach):
-    """Отказ по неизвестному id — тем же планом, что и обычная отправка: у `--json` одна форма."""
     problem = (f"задание id {args.assign_id} не найдено в mod_assign: проверь номер "
                f"(`study task <код> {args.assign_id}`) — это может быть cmid из сводки "
                "или задание, закрытое ограничением доступа")
@@ -215,8 +197,6 @@ def unknown_assign(args, text, attach):
 
 
 def cmd_submit(cfg, args):
-    """План сверяется с настройками задания (что принимает) и с файлами на диске; при
-    несовпадении — отказ даже с --confirm. Вложения из --attach грузятся только при отправке."""
     m = Moodle(cfg)
     text = read_text(args.text)
     attach = [pathlib.Path(p) for p in args.attach or []]
@@ -224,8 +204,6 @@ def cmd_submit(cfg, args):
     found = next((a for c in course_list for a in c["assignments"]
                   if a["id"] == args.assign_id), None)
     if found is None:
-        # id из сводки бывает cmid, а закрытого ограничением задания в mod_assign нет вовсе:
-        # без него нельзя ни проверить приём, ни отправить — отказ до похода за статусом
         return unknown_assign(args, text, attach)
     acc = accepts(found)
     state = submission_state(found, m.submission_status(args.assign_id), int(time.time()))
@@ -267,13 +245,12 @@ def cmd_submit(cfg, args):
         return plan, "\n".join(lines), 1
     itemid = m.upload(attach, args.files or 0) if attach else args.files
     plan["files_itemid"] = itemid
-    plan["result"] = m.save_submission(args.assign_id, text, itemid)   # отказ — StudyError
+    plan["result"] = m.save_submission(args.assign_id, text, itemid)
     if drafts:
         plan["submitted"] = m.submit_for_grading(args.assign_id, statement)
     return plan, "Отправлено: {} (id {})".format(plan["name"] or "?", args.assign_id)
 
 
-# --- хостинги
 
 def client(cfg, args):
     return hosting.HOSTS[args.host](cfg, path=local.find_repo())
@@ -306,7 +283,6 @@ def cmd_host_api(cfg, args):
     return out, json.dumps(out, ensure_ascii=False, indent=1)
 
 
-# --- Rutube
 
 def rt(cfg, args):
     return Rutube(cfg, mode=args.mode)
@@ -406,7 +382,6 @@ def cmd_rt_upload(cfg, args):
     return v, text
 
 
-# --- сводки
 
 def cmd_digest(cfg, args):
     d = digest.collect(cfg, Moodle(cfg), days=args.days, save=not args.no_save, since=args.since)
@@ -437,7 +412,6 @@ def cmd_update(cfg, args):
         lines = update.plan(d) if d["behind"] else [f"Актуально: {d['version']}."]
         return d, "\n".join(lines + update.stale(d))
     if d["behind"] and not args.yes:
-        # код работает с токенами: сначала показать, что приедет; без терминала — только --yes
         lines = update.plan(d)
         if not sys.stdin.isatty():
             return d, "\n".join([*lines, "", "Повтори с --yes."]), 1
@@ -461,10 +435,7 @@ def cmd_agent(cfg, args):
     return rows, agent.render(rows, installed=bool(args.operator))
 
 
-# --- разбор аргументов
 
-# `--json` принимается и до, и после имени команды. SUPPRESS нужен, чтобы значение
-# из подкоманды не затирало уже разобранное значение основного разбора.
 JSON = argparse.ArgumentParser(add_help=False)
 JSON.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
                   help="машиночитаемый вывод")
@@ -641,7 +612,6 @@ def rt_parsers(sub):
 
 
 class Version(argparse.Action):
-    """`--version` зовёт git только когда спросили, а не при каждом запуске."""
 
     def __call__(self, parser, *_):
         print(f"study {update.version()}")

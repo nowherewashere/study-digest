@@ -14,8 +14,8 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         python: ["3.8", "3.12"]
     env:
-      TZ: MSK-3                  # время в фикстурах московское; на Windows tzset нет — только так
-      PYTHONIOENCODING: utf-8    # stdout раннера Windows — не консоль, а -v печатает кириллицу
+      TZ: MSK-3
+      PYTHONIOENCODING: utf-8
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

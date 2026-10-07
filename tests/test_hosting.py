@@ -14,7 +14,6 @@ REMOTES = {("remote", "get-url", "origin"): "ssh://git@gitverse.ru:2222/me/cours
 
 
 class HostingCase(unittest.TestCase):
-    """git подменён на карту «аргументы → вывод»: remote'ы и SHA тега без репозитория."""
 
     def setUp(self):
         self.tmp = tmpdir(self)
@@ -45,7 +44,7 @@ class RepoChoiceTest(HostingCase):
     def test_foreign_remote_ignored(self):
         with mock.patch.dict(REMOTES, {("remote", "get-url", "origin"):
                                        "git@github.com:me/course.git"}):
-            self.assertEqual(GitVerse(self.cfg, path=self.tmp).repo, "cfg/gv")   # не gitverse
+            self.assertEqual(GitVerse(self.cfg, path=self.tmp).repo, "cfg/gv")
         with self.assertRaises(StudyError) as e:
             GitVerse(config(self.tmp))
         self.assertIn("GV_REPO", e.exception.message)
@@ -72,7 +71,7 @@ class GitVerseTest(HostingCase):
                                  "url": "https://gitverse.ru/me/course/releases/tag/v1.1.0"},
                                 {"tag": "v1.0.0", "id": 3, "name": None, "assets": 0,
                                  "url": "https://gitverse.ru/me/course/releases/tag/v1.0.0"}])
-        self.net.reply("GET", "/releases", None)   # пустое тело — релизов нет
+        self.net.reply("GET", "/releases", None)
         self.assertEqual(self.gv.releases(), [])
 
     def test_release_sha_from_tag(self):
@@ -87,7 +86,6 @@ class GitVerseTest(HostingCase):
                                             "name": "ЛР 1",
                                             "body": "см. https://gitverse.ru/me/course/commit/abc\n",
                                             "draft": False, "prerelease": False})
-        # тело — ровно JSON, без хвостового перевода строки (GitVerse отвечает 422)
         self.assertFalse(req["data"].endswith(b"\n"))
         self.assertEqual(req["data"], json.dumps(req["json_body"], ensure_ascii=False).encode())
 
@@ -126,7 +124,7 @@ class GitVerseTest(HostingCase):
             with self.assertRaises(StudyError) as e:
                 self.gv.asset(7, f, name=bad)
             self.assertIn("не принимает .qmd и .html", e.exception.message)
-        self.assertEqual(len(self.net.sent), 1)   # отказ — до запроса
+        self.assertEqual(len(self.net.sent), 1)
 
     def test_api_error(self):
         self.net.reply("GET", "/x", StudyError("gitverse", "HTTP 400 (пустой ответ)", where="/x"))
@@ -157,7 +155,7 @@ class SourceCraftTest(HostingCase):
     def test_localize(self):
         self.assertEqual(self.sc.localize("a https://gitverse.ru/me/course/commit/abc b"),
                          "a https://sourcecraft.dev/org/course/commit/abc b")
-        other = "https://gitverse.ru/other/repo/commit/abc"   # чужой репозиторий — как есть
+        other = "https://gitverse.ru/other/repo/commit/abc"
         self.assertEqual(self.sc.localize(other), other)
 
     def test_release_localized_no_branch(self):
@@ -169,7 +167,7 @@ class SourceCraftTest(HostingCase):
         self.assertEqual(self.net.sent[0]["json_body"],
                          {"tag": "v1.1.0", "title": "ЛР 1", "publish": True,
                           "release_notes": "см. https://sourcecraft.dev/org/course/commit/abc\n"})
-        self.assertNotIn(("rev-parse", "v1.1.0^{commit}"), self.gits)   # SHA не нужен
+        self.assertNotIn(("rev-parse", "v1.1.0^{commit}"), self.gits)
         self.net.reply("POST", "/releases", None)
         out = self.sc.release("v1.2.0", "t", "n", branch="master")
         self.assertEqual((out["tag"], out["status"]), ("v1.2.0", None))

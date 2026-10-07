@@ -1,8 +1,3 @@
-"""Карточка задания: текст, срок, состояние ответа, что принимает, что есть на диске.
-
-Ничего не пишет и не запоминает: ТУИС — единственный источник, карточка собирается
-по запросу. С неё агент разбирает задание и отвечает на вопросы о нём.
-"""
 import re
 import time
 
@@ -14,8 +9,6 @@ from .moodle import PENDING, accepts, accepts_line, submission_state
 
 
 def on_disk(cfg, code, num, flow):
-    """Что есть по лабе на диске: у release — лаба репозитория со всей готовностью,
-    у file — каталог <код>/labNN и собранные PDF."""
     if not code or not num:
         return None
     if flow == "release":
@@ -28,19 +21,15 @@ def on_disk(cfg, code, num, flow):
 
 
 def in_stash(code, num):
-    """Файлы stash/, в имени которых есть номер лабы — эвристика, подписана как «возможно».
-    Номер ищется в имени без расширения и не внутри кодов вроде 02.03.02."""
     if not code or not num:
         return []
     stash = ROOT / code / "stash"
-    pat = re.compile(rf"(?<![\d.])0*{int(num)}(?![\d.])")   # 001-dns.pdf тоже про лабу 1
+    pat = re.compile(rf"(?<![\d.])0*{int(num)}(?![\d.])")
     return sorted(p.name for p in stash.rglob("*") if p.is_file() and pat.search(p.stem)) \
         if stash.is_dir() else []
 
 
 def build(cfg, moodle, course, what):
-    """Карточка задания. Задание, которого mod_assign не отдал (ограничение доступа), знает
-    только то, что видно в составе курса: статус ответа по нему не спросить."""
     errors = []
     reg = Registry(moodle, [course.id], soft=lambda where: soft(errors, where))
     w = reg.find(course, what)
@@ -96,13 +85,12 @@ def state_line(d):
     s = d["submission"]
     state = SUBMISSION.get(s["status"], s["status"])
     if not d.get("available", True):
-        # причина из ТУИС («Вы принадлежите к группе …») — единственное, что тут известно
         return state + (f" · {d['reason']}" if d.get("reason") else "")
     if s["attempt"]:
         state += f" · попытка {s['attempt']}"
     if d["grade"] is not None:
         state += f" · балл {d['grade']}" + (f" ({d['grade_text']})" if d["grade_text"] else "")
-    if s["modified"] and s["status"] != "new":   # у несданного Moodle подставляет срок
+    if s["modified"] and s["status"] != "new":
         state += f" · изменён {s['modified']['full']}"
     if d["opens"] and s["status"] in PENDING:
         state += f" · откроется {d['opens']['full']}"
@@ -127,7 +115,6 @@ def render(d):
     for f in d["attachments"]:
         out.append(f"Вложение задания: {f['name']} — {f['url']}")
     if d["warnings"]:
-        # состав курса не прочитался: карточка неполная, и об этом нельзя молчать
         out.append("Не удалось: " + "; ".join(
             f"{w['source']} · {w['where']} · {w['message'][:80]}" for w in d["warnings"]))
     return "\n".join(out) + "\n\n" + (d["intro"] or "(текста задания нет)")

@@ -1,8 +1,3 @@
-"""Снимок состояния между сводками: что считать «прошлым запуском».
-
-`state.json` — последний снимок; рядом в `state/ГГГГ-ММ-ДД.json` — по одному на день
-(последнее сохранение дня), чтобы сводку можно было пересчитать от любой даты.
-"""
 import datetime
 import json
 import re
@@ -15,18 +10,15 @@ DAY = 86400
 
 
 def history_dir(cfg):
-    """Каталог снимков по дням — рядом с текущим снимком."""
     return cfg.state_file().with_name("state")
 
 
 def history(cfg, day=None):
-    """Дневные снимки не позже `day` (ГГГГ-ММ-ДД), от старых к новым."""
     return sorted(p for p in history_dir(cfg).glob("????-??-??.json")
                   if day is None or p.stem <= day)
 
 
 def read(path):
-    """Снимок из файла; битый (обрыв записи, правка руками) — None."""
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except ValueError:
@@ -34,7 +26,6 @@ def read(path):
 
 
 def latest(paths):
-    """Последний целый снимок из списка → (снимок, путь); нет — (None, None)."""
     for p in reversed(paths):
         state = read(p)
         if state is not None:
@@ -43,14 +34,6 @@ def latest(paths):
 
 
 def load_state(cfg, since=None, errors=None):
-    """Состояние, которое считать прошлым запуском, по значению `--since`:
-
-    None — текущий `state.json`; если он повреждён — последний целый дневной снимок,
-    а без него пустой, как при первом запуске (об этом — запись в `errors`);
-    `never` — снимка нет, как при первом запуске: обновления не отслеживаются;
-    `all` — пустой снимок с точкой отсчёта в начале времён: новым считается всё;
-    число — столько дней назад; `ГГГГ-ММ-ДД` — с полуночи этого дня: ближайший снимок
-    не позже этой точки, а пока истории нет — текущий файл с ней как точкой отсчёта."""
     current = cfg.state_file()
     if since is None:
         state = read(current) if current.exists() else {}
@@ -83,7 +66,6 @@ def load_state(cfg, since=None, errors=None):
 
 
 def save_state(cfg, state):
-    """Записать снимок: текущий файл, копия за день по last_run, старше KEEP_DAYS — удалить."""
     current = cfg.state_file()
     current.parent.mkdir(parents=True, exist_ok=True)
     text = json.dumps(state, ensure_ascii=False, indent=1)

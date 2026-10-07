@@ -1,4 +1,3 @@
-"""install.py: клон во временный каталог из локального репозитория, передача шагов в study setup."""
 import builtins
 import contextlib
 import importlib.util
@@ -37,7 +36,7 @@ class InstallTest(unittest.TestCase):
         git(self.upstream, "commit", "-q", "-m", "feat: файлы")
         os.environ["STUDY_REPO"] = str(self.upstream)
         self.mod = load()
-        patch(self, self.mod, "HERE", self.tmp / "downloads")   # install.py скачан отдельно
+        patch(self, self.mod, "HERE", self.tmp / "downloads")
         self.answers, self.calls = [], []
         patch(self, builtins, "input", lambda _="": self.answers.pop(0))
         patch(self, sys, "stdin", mock.Mock(isatty=lambda: True))
@@ -86,7 +85,7 @@ class InstallTest(unittest.TestCase):
         self.assertIn("  ! в пути нельзя '=' (ломает libvirt/virtiofsd)\n", out)
         self.assertIn("  ! слишком длинный путь (лимит unix-сокетов Packer ~108 байт)\n", out)
         self.assertIn(f"  ! {busy} существует и не пуст — выбери другой\n", out)
-        self.assertIn(f"  ! {busy / 'x'} существует и не пуст — выбери другой\n", out)   # файл
+        self.assertIn(f"  ! {busy / 'x'} существует и не пуст — выбери другой\n", out)
         self.assertTrue((self.tmp / "study" / ".digest" / "study").exists())
         self.assertEqual(self.calls[0][0][1], str(self.tmp / "study" / ".digest" / "study"))
 
@@ -122,7 +121,7 @@ class InstallTest(unittest.TestCase):
         digest = self.tmp / "study" / ".digest"
         shutil.copytree(self.upstream, digest)
         patch(self, self.mod, "HERE", digest)
-        rc, out = self.run_install()   # ни одного вопроса
+        rc, out = self.run_install()
         self.assertEqual(rc, 0)
         self.assertIn(f"  + уже на месте: {digest}\n", out)
         self.assertTrue((digest / "config.env").exists())

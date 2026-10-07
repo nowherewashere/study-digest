@@ -20,7 +20,7 @@ class LocalTest(unittest.TestCase):
     def test_lab_id(self):
         self.assertEqual(local.lab_id("1"), "01")
         self.assertEqual(local.lab_id(" LAB02 "), "02")
-        for bad in ("hw1", "123", "x", ""):   # домашних у study answer нет: только labNN
+        for bad in ("hw1", "123", "x", ""):
             with self.assertRaises(StudyError):
                 local.lab_id(bad)
 
@@ -49,7 +49,6 @@ class NetTest(unittest.TestCase):
         self.assertIn("нет связи", e.exception.message)
 
     def test_retries(self):
-        """Повторы: 502–504 и обрыв — до retries раз с паузой; 4xx, сертификат — сразу."""
         class Reply:
             status, headers = 200, {}
 
@@ -73,7 +72,6 @@ class NetTest(unittest.TestCase):
             return urlopen
 
         def http(code):
-            # fp обязателен: в 3.8 без него read() падает, а настоящий urlopen его даёт всегда
             return urllib.error.HTTPError("https://x.example/", code, "err", {}, io.BytesIO())
 
         naps = []
@@ -90,7 +88,7 @@ class NetTest(unittest.TestCase):
             self.assertEqual(len(naps), tries - 1, bad)
         self.assertEqual(e.exception.code, "certificate")
         patch(self, urllib.request, "urlopen", fails(http(503), None))
-        with self.assertRaises(StudyError) as e:   # по умолчанию повторов нет
+        with self.assertRaises(StudyError) as e:
             net.send("https://x.example/", "moodle")
         self.assertIn("HTTP 503", e.exception.message)
 
@@ -117,7 +115,7 @@ class HostingTest(unittest.TestCase):
         self.assertEqual(gv.web_url("v1"), "https://gitverse.ru/o/r/releases/tag/v1")
         self.assertEqual(sc.web_url("v1"), "https://sourcecraft.dev/org/r/releases/v1")
         self.assertEqual(sc.localize("see https://gitverse.ru/o/r/commit/abc"),
-                         "see https://gitverse.ru/o/r/commit/abc")   # без path — нечего подменять
+                         "see https://gitverse.ru/o/r/commit/abc")
 
 
 if __name__ == "__main__":

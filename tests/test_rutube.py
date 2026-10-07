@@ -10,7 +10,6 @@ from tests.fakes import FakeNet, config, tmpdir
 
 
 def jwt(**payload):
-    """JWT без подписи: инструмент читает только полезную нагрузку."""
     body = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
     return f"eyJhbGciOiJIUzI1NiJ9.{body}.sig"
 
@@ -54,7 +53,6 @@ class AuthTest(RutubeCase):
 
     def test_mint_cache_and_rotation(self):
         self.refresh.write_text("R1\n", encoding="utf-8")
-        # истекает раньше запаса — перевыпуск
         self.access.write_text(STALE + "\n", encoding="utf-8")
         self.net.reply("POST", REFRESH_URL, {"access_token": FRESH, "refresh_token": "R2"})
         r = self.rt("jwt")
@@ -65,8 +63,8 @@ class AuthTest(RutubeCase):
         self.assertEqual(self.access.read_text(encoding="utf-8"), FRESH + "\n")
         if os.name == "posix":
             self.assertEqual(oct(self.access.stat().st_mode)[-3:], "600")
-        self.assertEqual(r._mint(), FRESH)                  # в памяти
-        self.assertEqual(self.rt("jwt")._mint(), FRESH)     # из файла, без сети
+        self.assertEqual(r._mint(), FRESH)
+        self.assertEqual(self.rt("jwt")._mint(), FRESH)
         self.assertEqual(len(self.net.sent), 1)
 
     def test_mint_keeps_refresh_without_rotation(self):
@@ -89,7 +87,6 @@ class AuthTest(RutubeCase):
         self.net.reply("POST", REFRESH_URL, {"error": "x"})
         with self.assertRaises(StudyError):
             self.rt().save_refresh("refreshToken=BAD; ym_uid=1")
-        # битый ввод не затирает рабочий
         self.assertEqual(self.refresh.read_text(encoding="utf-8"), "OLD\n")
         self.net.reply("POST", REFRESH_URL, {"access_token": FRESH, "refresh_token": "R2"})
         out = self.rt().save_refresh("refreshToken=R1; ym_uid=1")
@@ -143,7 +140,7 @@ class ApiTest(RutubeCase):
         self.net.reply("GET", "/video/category/",
                        [{"id": 13, "short_name": "misc", "name": "Разное"}])
         self.assertEqual(self.r.categories(), [{"id": 13, "short": "misc", "name": "Разное"}])
-        self.assertNotIn("Authorization", self.net.sent[1]["headers"])   # публичный список
+        self.assertNotIn("Authorization", self.net.sent[1]["headers"])
 
     def test_edit_fields(self):
         self.net.reply("PATCH", "/v2/video/v1/?client=vulp", {"title": "Новое"})
@@ -192,7 +189,7 @@ class ApiTest(RutubeCase):
         self.net.reply("PATCH", "/v2/video/v7/?client=vulp", {})
         self.net.reply("POST", UPLOAD_URL + "S1", b"", headers={"Upload-Offset": "5"})
         out = self.r.upload_file(f, category=13)
-        self.assertEqual(out["title"], "lab01")   # имя файла без расширения
+        self.assertEqual(out["title"], "lab01")
         sess, edit, tus = self.net.sent
         self.assertEqual(sess["json_body"], {"title": "lab01"})
         self.assertEqual(edit["json_body"], {"title": "lab01", "is_hidden": False, "category": 13})

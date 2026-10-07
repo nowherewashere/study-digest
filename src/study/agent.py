@@ -1,15 +1,8 @@
-"""ИИ-оператор: файл инструкций для агента в корне учебной директории.
-
-Текст один — `docs/AGENTS.md`; у операторов различаются только имена файлов. Он вписывается
-блоком между маркерами, и `study agent` переписывает только этот блок: всё, что вне его, —
-личные правила пользователя, они не трогаются. Симлинк не подходит: задача Claude Code Desktop
-читает файл из Windows через `\\\\wsl.localhost`, а симлинки WSL оттуда не открываются.
-"""
 from .config import HERE, ROOT
 from .fmt import table
 
 SOURCE = HERE / "docs" / "AGENTS.md"
-OPERATORS = {   # код → (кто читает, файл в корне учебной директории)
+OPERATORS = {
     "claude": ("Claude Code", "CLAUDE.md"),
     "codex": ("OpenAI Codex; тот же AGENTS.md читают Cursor, Copilot coding agent, Jules, Zed",
               "AGENTS.md"),
@@ -21,13 +14,11 @@ END = "<!-- study:end -->"
 
 
 def block():
-    """Текст docs/AGENTS.md между маркерами — то, что вписывается в файл оператора."""
     text = SOURCE.read_text(encoding="utf-8").strip()
     return f"{BEGIN}\n{text}\n{END}\n"
 
 
 def status(operator):
-    """Есть ли файл оператора, стоит ли в нём блок и совпадает ли он с docs/AGENTS.md."""
     name, rel = OPERATORS[operator]
     path = ROOT / rel
     text = path.read_text(encoding="utf-8") if path.exists() else ""
@@ -38,7 +29,6 @@ def status(operator):
 
 
 def install(operator):
-    """Создать файл оператора или обновить в нём блок; остальной текст файла сохраняется."""
     path = ROOT / OPERATORS[operator][1]
     new = block()
     text = path.read_text(encoding="utf-8") if path.exists() else ""
@@ -56,7 +46,6 @@ def install(operator):
 
 
 def render(rows, installed=False):
-    """Таблица операторов; `installed` — строки после `study agent <код>`, иначе подсказка."""
     state = {True: "актуален", False: "устарел", None: "нет"}
     lines = [table([[r["operator"], r["file"], state[r["current"] if r["installed"] else None],
                      r["name"]] for r in rows], ["код", "файл", "блок", "кто читает"])]

@@ -107,6 +107,8 @@
   `str.removeprefix`, `dict | dict`, `zip(strict=)`;
 - `ruff check src tests study install.py` (правила в `pyproject.toml`, строка ≤ 100);
   у каждого `open`/`read_text`/`write_text` — `encoding=` (`tests/test_style.py`);
+- комментариев и докстрингов в коде нет (исключения — шебанг и `# noqa: КОД`); пояснения —
+  в именах, коммитах и `docs/`; проверяет `tests/test_style.py`;
 - тесты без сети: `python3 -m unittest` из `.digest` (или `PYTHONPATH=src python3 -m unittest
   discover -s tests -t .`); внешние ответы — `tests/fakes.py: FakeNet` и фикстуры
   `tests/fixtures/*.json` по форме из `docs/tuis-api.md`; тесты не должны писать в настоящие

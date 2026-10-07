@@ -1,15 +1,16 @@
-"""Кодировка файлов задана явно везде: на Windows системная — cp1251, а у нас кириллица."""
+import ast
+import io
 import pathlib
 import re
 import tokenize
 import unittest
 
+DOCABLE = (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
 HERE = pathlib.Path(__file__).resolve().parents[1]
 CALL = re.compile(r"(\.read_text|\.write_text|(?<![\w.])open)\($")
 
 
 def calls(path):
-    """(строка, аргументы) каждого вызова read_text/write_text/open — по токенам, без строк."""
     with tokenize.open(path) as f:
         tokens = list(tokenize.generate_tokens(f.readline))
     depth, start, args, out = 0, None, [], []
@@ -33,4 +34,25 @@ class EncodingTest(unittest.TestCase):
                  HERE / "install.py"]
         bad = [f"{f.relative_to(HERE)}:{line}" for f in files if f.exists()
                for line, args in calls(f) if "encoding" not in args]
+        self.assertEqual(bad, [])
+
+
+class NoCommentsTest(unittest.TestCase):
+    def test_no_comments_or_docstrings(self):
+        bad = []
+        for f in [*HERE.glob("src/study/*.py"), *HERE.glob("tests/*.py"), HERE / "study",
+                  HERE / "install.py"]:
+            if not f.exists():
+                continue
+            name = f.relative_to(HERE)
+            with tokenize.open(f) as fh:
+                src = fh.read()
+            for t in tokenize.generate_tokens(io.StringIO(src).readline):
+                if t.type == tokenize.COMMENT and not t.string.startswith("# noqa") \
+                        and not (t.start[0] == 1 and t.string.startswith("#!")):
+                    bad.append(f"{name}:{t.start[0]}")
+            for n in ast.walk(ast.parse(src)):
+                if isinstance(n, DOCABLE) \
+                        and ast.get_docstring(n, clean=False) is not None:
+                    bad.append(f"{name}:{getattr(n, 'lineno', 1)}")
         self.assertEqual(bad, [])

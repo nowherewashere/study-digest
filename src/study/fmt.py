@@ -1,4 +1,3 @@
-"""Форматирование: единственный источник дат и текста для всего инструмента."""
 import datetime
 import html as htmllib
 import re
@@ -9,7 +8,6 @@ DAY = 24 * HOUR
 
 
 def left(sec):
-    """Сколько осталось, словами."""
     if sec < 0:
         return "срок прошёл"
     if sec < HOUR:
@@ -27,7 +25,6 @@ def weekday(ts):
 
 
 def moment(ts, now=None):
-    """Единый объект времени во всём JSON. Нет срока — None, а не пустая строка."""
     if not ts:
         return None
     ts = int(ts)
@@ -35,8 +32,6 @@ def moment(ts, now=None):
     delta = ts - now
     return {
         "ts": ts,
-        # Без tz=utc Windows падает с OSError на первых часах эпохи (`--since all` даёт ts=1):
-        # пересчёт naive-времени в местное уходит за 1970-01-01 UTC.
         "iso": datetime.datetime.fromtimestamp(ts, datetime.timezone.utc)
                        .astimezone().isoformat(timespec="seconds"),
         "text": time.strftime("%d.%m %H:%M", time.localtime(ts)),
@@ -48,15 +43,11 @@ def moment(ts, now=None):
 
 
 def plain(s, limit=280):
-    """HTML из описаний Moodle → однострочный текст; пробел перед знаком препинания,
-    оставшийся от строчного тега (`<b>…</b>.`), убирается."""
     s = re.sub(r"<[^>]+>", " ", s or "")
     s = re.sub(r"\s+([.,;:!?»)])", r"\1", htmllib.unescape(re.sub(r"\s+", " ", s)).strip())
     return s[:limit] + ("…" if len(s) > limit else "")
 
 
-# Названия заданий в ТУИС длинные и однотипные; в таблице нужна суть.
-# Вид работы → подпись; шаблоны: группа 1 — номер, группа 2 (если есть) — тема.
 WORKS = {"lab": "ЛР", "hw": "ДЗ", "topic": "Тема доклада к лекции", "talk": "Доклад к лекции",
          "retake": "Пересдача ЛР", "task": "Задача"}
 PATTERNS = [
@@ -71,7 +62,6 @@ PATTERNS = [
 
 
 def parse_name(name):
-    """Разбор названия задания: {"work", "num", "topic"}; незнакомое имя — None."""
     name = (name or "").strip()
     for work, pat in PATTERNS:
         m = re.match(pat, name, re.I)
@@ -82,14 +72,11 @@ def parse_name(name):
 
 
 def lab_number(name, work="lab"):
-    """Номер лабы из названия задания (labNN); у домашних и докладов каталога нет."""
     p = parse_name(name)
     return p["num"].zfill(2) if p and p["work"] == work else None
 
 
 def short_name(name, tail=True):
-    """«Сдать отчет по лабораторной работе № 2. Простые сети» → «ЛР 2 — Простые сети»;
-    `tail=False` — только «ЛР 2». Незнакомое имя — как есть, до 60 символов."""
     p = parse_name(name)
     if not p:
         return plain(name, 60)
@@ -97,7 +84,6 @@ def short_name(name, tail=True):
 
 
 def md_table(rows, headers):
-    """Markdown-таблица: сводку читают как markdown, а не в терминале."""
     def line(r):
         return "| " + " | ".join(str(c) for c in r) + " |"
     return "\n".join([line(headers), line("-" * max(len(h), 3) for h in headers)] +
@@ -105,7 +91,6 @@ def md_table(rows, headers):
 
 
 def table(rows, headers=None):
-    """Простая таблица с выравниванием по колонкам."""
     rows = [[str(c) for c in r] for r in rows]
     if not rows:
         return ""

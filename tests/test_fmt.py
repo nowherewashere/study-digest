@@ -31,7 +31,7 @@ class NamesTest(unittest.TestCase):
         self.assertEqual(fmt.short_name("<b>Тест</b> &amp; ещё"), "Тест & ещё")
         self.assertEqual(fmt.plain("<p>Нет <b>схемы</b>.</p><p>Срок: 1 <i>день</i>!</p>"),
                          "Нет схемы. Срок: 1 день!")
-        self.assertEqual(len(fmt.short_name("x" * 100)), 61)   # 60 символов и многоточие
+        self.assertEqual(len(fmt.short_name("x" * 100)), 61)
 
 
 class TimeTest(unittest.TestCase):
@@ -46,9 +46,7 @@ class TimeTest(unittest.TestCase):
         m = fmt.moment(1_000_000, now=1_000_000 - fmt.DAY)
         self.assertEqual((m["ts"], m["left"], m["left_sec"], m["overdue"]),
                          (1_000_000, "1 дн", fmt.DAY, False))
-        self.assertTrue(fmt.moment(1_000_010, now=1_000_020)["overdue"])   # <0 на Windows нельзя
-        # ts=1 даёт --since all; на Windows astimezone() naive-времени первых часов эпохи
-        # падал OSError 22 (#1) — CI на windows-latest это поймает
+        self.assertTrue(fmt.moment(1_000_010, now=1_000_020)["overdue"])
         self.assertEqual(fmt.moment(1)["ts"], 1)
         self.assertTrue(fmt.moment(1)["iso"].startswith("1970-01-01T"))
 

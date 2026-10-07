@@ -1,14 +1,3 @@
-"""Rutube: две схемы входа на выбор.
-
-token — старый DRF TokenAuthentication: token_auth по email+паролю, заголовок «Token <t>»,
-        токен бессрочный. Работает только для аккаунтов с паролем (auth_type=password).
-jwt   — новая схема rupass (VK ID / Gazprom ID): годовой refresh_token (ротируется при каждом
-        обращении) минтит короткий access_token, заголовок «Bearer <t>». Единственный путь для
-        аккаунтов через внешний SSO (auth_type=gid). refresh_token берётся один раз из cookie
-        браузера (rutube.ru → DevTools → Application → Cookies → refreshToken).
-
-Режим выбирается флагом --mode; auto предпочитает jwt (если есть файл refresh), иначе token.
-"""
 import base64
 import getpass
 import json
@@ -23,22 +12,18 @@ from .config import StudyError
 BASE = "https://rutube.ru/api"
 REFRESH_URL = "https://rutube.ru/multipass/api/v3/accounts/token/"
 UPLOAD_URL = "https://u.rutube.ru/upload/"
-# u.rutube.ru за антиботом — ходим с браузерными UA/Origin/Referer, как студия.
 WEB_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
           "Chrome/128.0 Safari/537.36")
-# Возрастное ограничение: человеческий возраст → age_id (справочник зашит в студию, эндпоинта нет).
 AGE = {0: 1, 6: 2, 12: 3, 14: 6, 16: 4, 18: 5}
-DEFAULT_CATEGORY = 13   # «Разное»; список — `study rt categories`
-ACCESS_MARGIN = 120     # секунд до истечения access, когда его пора перевыпустить
+DEFAULT_CATEGORY = 13
+ACCESS_MARGIN = 120
 
 
 def _obj(out):
-    """Ответ как словарь: пустое тело, текст или список → {}."""
     return out if isinstance(out, dict) else {}
 
 
 def _extract_refresh(s):
-    """Значение cookie refreshToken из строки; если передан сам токен — возвращает как есть."""
     s = (s or "").strip()
     for part in s.split(";"):
         name, sep, value = part.strip().partition("=")
@@ -66,7 +51,6 @@ class Rutube:
 
     @staticmethod
     def _save(path, value):
-        """Атомарно: пишем во временный файл и подменяем — обрыв не оставит пустой credential."""
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_name(path.name + ".tmp")
         tmp.write_text(value + "\n", encoding="utf-8")
@@ -77,7 +61,6 @@ class Rutube:
 
     @staticmethod
     def _jwt_payload(token):
-        """Полезная нагрузка JWT; {} — если не разобрать."""
         try:
             p = token.split(".")[1]
             data = json.loads(base64.urlsafe_b64decode(p + "=" * (-len(p) % 4)))
@@ -85,10 +68,8 @@ class Rutube:
             return {}
         return data if isinstance(data, dict) else {}
 
-    # --- вход ---
 
     def login(self, email=None, password=None):
-        """Схема token: token_auth по email+паролю. Пароль не хранится — только сам токен."""
         email = email or input("Rutube email: ").strip()
         password = password or getpass.getpass("Rutube пароль: ")
         out = _obj(net.request(BASE + "/accounts/token_auth/", self.source,
@@ -101,11 +82,6 @@ class Rutube:
         return {"token_file": str(self._token_path()), "ok": True}
 
     def save_refresh(self, refresh=None):
-        """Схема jwt: проверить refresh_token (сам токен или строку cookie) и сохранить.
-
-        Проверка идёт ДО записи, поэтому битый ввод не затирает уже рабочий файл; на диск
-        ложится ротированный токен из ответа.
-        """
         if refresh is None:
             refresh = getpass.getpass("Rutube refreshToken (или строка cookie): ")
         refresh = _extract_refresh(refresh)
@@ -117,10 +93,8 @@ class Rutube:
         self._access = access
         return {"refresh_file": str(self._refresh_path()), "ok": True}
 
-    # --- авторизация запросов ---
 
     def _refresh_call(self, token):
-        """refresh_token → (свежий access_token, новый refresh_token|None). Ошибка — StudyError."""
         out = _obj(net.request(REFRESH_URL, self.source, method="POST",
                                headers={"Cookie": "refreshToken=" + token},
                                where="token/refresh"))
@@ -130,7 +104,6 @@ class Rutube:
         return access, out.get("refresh_token")
 
     def _mint(self):
-        """Кэшированный access; refresh дёргаем только когда access истёк (он живёт ~14 дней)."""
         if self._access:
             return self._access
         af = self._access_path()
@@ -167,25 +140,20 @@ class Rutube:
         raise StudyError(self.source, f"неизвестный режим {mode}", code="config")
 
     def api(self, path, **kw):
-        """Запрос с авторизацией, ответ как есть (для `rt api`)."""
         head = self._auth_header()
         head.update(kw.pop("headers", None) or {})
         return net.request(BASE + path, self.source, headers=head, where=path, **kw)
 
     def _json(self, path, **kw):
-        """То же, но ответ — всегда словарь."""
         return _obj(self.api(path, **kw))
 
     def me(self):
-        """Проверка входа: список своих видео, первая страница."""
         rows = self._json("/video/person/?limit=5").get("results", [])
         return [{"id": v.get("id"), "title": v.get("title"), "url": v.get("video_url"),
                  "hidden": v.get("is_hidden")} for v in rows]
 
-    # --- видео-флоу ---
 
     def categories(self):
-        """Список категорий (публично, токен не нужен, ответ — голый массив)."""
         rows = net.request(BASE + "/video/category/", self.source, where="video/category") or []
         return [{"id": c.get("id"), "short": c.get("short_name"), "name": c.get("name")}
                 for c in rows]
@@ -199,11 +167,9 @@ class Rutube:
         return f"https://rutube.ru/plst/{pid}/"
 
     def video(self, vid):
-        """Метаданные и состояние своего видео (v2)."""
         return self._json(f"/v2/video/{vid}/")
 
     def edit(self, vid, **fields):
-        """PATCH метаданных: title/description/category (int id)/is_hidden/age (0,6,12,14,16,18)."""
         age = fields.pop("age", None)
         body = {k: v for k, v in fields.items() if v is not None}
         if age is not None:
@@ -213,7 +179,6 @@ class Rutube:
         return self._json(f"/v2/video/{vid}/?client=vulp", method="PATCH", json_body=body)
 
     def _channel_id(self):
-        """id канала (= user_id из access-токена) — нужен для списка своих плейлистов."""
         data = self._jwt_payload(self._mint())
         cid = data.get("user_id") or (data.get("data") or {}).get("user_info", {}).get("id")
         if not cid:
@@ -221,7 +186,6 @@ class Rutube:
         return cid
 
     def playlists(self):
-        """Свои плейлисты."""
         rows = self._json(f"/playlist/user/{self._channel_id()}/").get("results", [])
         return [{"id": p.get("id"), "title": p.get("title"), "url": self.playlist_url(p.get("id")),
                  "count": p.get("videos_count"), "hidden": p.get("is_hidden")} for p in rows]
@@ -234,23 +198,18 @@ class Rutube:
                 "url": self.playlist_url(pid) if pid else None}
 
     def playlist_add(self, pid, vid):
-        """Добавить видео vid в плейлист pid (в пути — id видео, include — id плейлистов)."""
         return self._json(f"/playlist/custom/update/{vid}/", method="POST",
                           json_body={"include": [int(pid)], "exclude": []})
 
-    # --- загрузка ---
 
     def progress(self, vid):
-        """Прогресс загрузки/конвертации видео."""
         return self._json(f"/uploader/{vid}/progress/")
 
     def _describe(self, vid, title, hidden, **fields):
-        """Общий хвост загрузки: выставить метаданные и вернуть карточку видео."""
         self.edit(vid, title=title, is_hidden=bool(hidden), **fields)
         return {"id": vid, "url": self.video_url(vid), "title": title, "hidden": bool(hidden)}
 
     def upload_url(self, src, title=None, description=None, category=None, hidden=False, age=None):
-        """Импорт по URL: Rutube сам скачает файл, затем правим метаданные."""
         out = self._json("/video/", method="POST",
                          json_body={"url": src, "category_id": category or DEFAULT_CATEGORY})
         vid = out.get("video_id") or out.get("id")
@@ -261,7 +220,6 @@ class Rutube:
 
     def upload_file(self, path, title=None, description=None, category=None, hidden=False,
                     age=None):
-        """Прямая загрузка локального файла: сессия → метаданные → байты (tus)."""
         path = pathlib.Path(path)
         title = title or path.stem
         sess = self._json("/uploader/upload_session/?client=vulp&batch_id=" + uuid.uuid4().hex,
@@ -275,7 +233,6 @@ class Rutube:
         return card
 
     def _tus(self, sid, vid, body):
-        """tus creation-with-upload: весь файл одним POST (как студийный клиент, chunkSize=∞)."""
         def b64(s):
             return base64.b64encode(str(s).encode()).decode()
         meta = f"sessionId {b64(sid)},videoId {b64(vid)},userId {b64(self._channel_id())}"

@@ -10,25 +10,21 @@ from study.moodle import Moodle
 from tests.fakes import DAY, NOW, FakeNet, config, fixture, patch, repo, tmpdir
 
 DUE = {-5: 1789160340, -3: 1789333140, -2: 1789419540, 1: 1789678740, 3: 1789851540,
-       8: 1790283540, 10: 1790456340}      # 23:59 через N дней, как в фикстурах
+       8: 1790283540, 10: 1790456340}
 STATE = {"last_run": NOW - DAY,
-         # 13 нет — новое задание; у 12 срок был на день раньше — сдвинут
          "assignments": {"11": DUE[3], "12": DUE[-3], "14": 0, "15": DUE[1], "16": 1793393940,
                          "17": 1785704340, "18": DUE[8], "19": 1785704340, "20": DUE[8],
                          "21": DUE[10]},
          "courses": {"1": "Сетевые технологии", "2": "Вычислительные методы"},
          "grades": {"1": {"Сдать отчет по лабораторной работе № 1. Vagrant и Packer": 8.0}}}
 KEYS = {"1": ["121/002-dns.pdf", "122/big.zip", "122/lecture-01.pptx", "122/video.mp4",
-              "122/Ссылка", "123/index.html"], "2": ["221/lecture-01.pdf"]}   # состав в фикстурах
+              "122/Ссылка", "123/index.html"], "2": ["221/lecture-01.pdf"]}
 
 
 def queue(net, since=True):
-    """Все ответы ТУИС, которые обходит Collector: курсы 1 (nettech) и 2 (без папки)."""
     net.reply("POST", "core_webservice_get_site_info", fixture("site_info"))
     net.reply("POST", "core_enrol_get_users_courses", fixture("users_courses"))
     net.reply("POST", "mod_assign_get_assignments", fixture("assignments"))
-    # 18 (пересдача сданной ЛР 2) статуса не запрашивает: ответа нет, и done() это проверит;
-    # 13 и 19 — приём закрыт (canedit false), 21 — сдал одногруппник (teamsubmission)
     for aid, status in ((13, "closed"), (12, "submitted"), (15, "new"), (11, "new"),
                         (21, "team"), (19, "closed"), (20, "new")):
         net.reply("POST", ("mod_assign_get_submission_status", f"assignid={aid}"),
@@ -48,7 +44,6 @@ def queue(net, since=True):
                   fixture("updates_since"))
         net.reply("POST", ("core_course_get_updates_since", "courseid=2"),
                   fixture("updates_since_small"))
-        # форумы: 31 — объявления курса 1, 33 — курса 2 (пусто); 32 — не news, 34 — курс в игноре
         net.reply("POST", "mod_forum_get_forums_by_courses", fixture("forums"))
         net.reply("POST", ("mod_forum_get_forum_discussions", "forumid=31"),
                   fixture("forum_discussions"))
@@ -68,16 +63,14 @@ def names(items):
 
 
 class DigestCase(unittest.TestCase):
-    """Время и пояс зафиксированы: тексты дат в сводке зависят от обоих."""
 
     @classmethod
     def setUpClass(cls):
         cls._tz = os.environ.get("TZ")
-        os.environ["TZ"] = "MSK-3"   # POSIX-строка: не зависит от tzdata
+        os.environ["TZ"] = "MSK-3"
         if hasattr(time, "tzset"):
             time.tzset()
         elif time.strftime("%H:%M", time.localtime(NOW)) != "09:00":
-            # Windows: пояс читается из TZ только при старте процесса — задать TZ=MSK-3 снаружи
             raise unittest.SkipTest("нужен TZ=MSK-3 в окружении")
 
     @classmethod
@@ -104,26 +97,23 @@ class CollectorTest(DigestCase):
 
     def test_sections(self):
         _, d = self.collect()
-        self.assertEqual([x["id"] for x in d["courses"]], [1, 2])   # скрытый 3 и игнор 4 — нет
+        self.assertEqual([x["id"] for x in d["courses"]], [1, 2])
         self.assertEqual(names(d["deadlines"]),
                          ["ЛР 3 — DHCP", "ЛР 1 — Vagrant и Packer", "Тема доклада к лекции 1",
                           "Доклад к лекции 1", "Опрос о курсе", "Пересдача ЛР 5", "ЛР 1"])
         self.assertEqual(names(d["overdue"]), ["ДЗ 1 — Кодирование"])
         self.assertEqual(names(d["submitted"]), ["ЛР 2 — DNS"])
-        # ДЗ 1 просрочено и приём закрыт (cutoff = срок, canedit false) — не в «Горит»
         self.assertEqual(names(d["not_started"]),
                          ["ЛР 3 — DHCP", "ЛР 1 — Vagrant и Packer", "Пересдача ЛР 5"])
         by = {a["short"]: a for a in d["overdue"] + d["deadlines"] + d["submitted"]}
         self.assertTrue(by["ДЗ 1 — Кодирование"]["closed"])
-        self.assertEqual(by["ЛР 3 — DHCP"]["opens"]["ts"], 1789581600)   # приём ещё не открыт
+        self.assertEqual(by["ЛР 3 — DHCP"]["opens"]["ts"], 1789581600)
         self.assertEqual((by["ЛР 1"]["submission"], by["ЛР 1"]["graded"]),
-                         ("submitted", False))   # групповое: сдал одногруппник, не оценено
+                         ("submitted", False))
         self.assertEqual(names(d["new_assignments"]), ["ДЗ 1 — Кодирование"])
         self.assertEqual(d["new_courses"], [])
         self.assertEqual([(a["short"], a["was"]["ts"], a["due"]["ts"]) for a in d["moved"]],
                          [("ЛР 2 — DNS", DUE[-3], DUE[-2])])
-        # состав курса: скрытое задание — «доступ закрыт»; тема не выбрана — submission "new"
-        # (отмеченный вариант — в test_choice_made)
         by = {a["short"]: a for a in d["deadlines"]}
         self.assertEqual((by["Доклад к лекции 1"]["source"], by["Доклад к лекции 1"]["submission"]),
                          ("course_contents", "hidden"))
@@ -143,13 +133,10 @@ class CollectorTest(DigestCase):
         d = digest.Collector(self.cfg, Moodle(self.cfg), 21, STATE).run()
         pick = next(a for a in d["deadlines"] if a.get("modname") == "choice")
         self.assertEqual((pick["choice"]["chosen"], pick["submission"]), ("Тема Б", "submitted"))
-        self.assertNotIn("Тема доклада", digest.render_digest(d))   # выбранная — как сданная
+        self.assertNotIn("Тема доклада", digest.render_digest(d))
 
     def test_retakes(self):
-        # ЛР 2 сдана — её пересдача не срок; ЛР 5 старше окна, не сдана — пересдача нужна
         _, d = self.collect()
-        # скрытая пересдача ЛР 1 курса 2 (из состава курса): ЛР 1 сдана — не срок
-        # порядок — по сроку, при равных сроках по курсу: у пересдачи ЛР 1 курс без папки
         self.assertEqual([(r["short"], r["retake_of"], r["needed"]) for r in d["retakes"]],
                          [("Пересдача ЛР 1", 21, False), ("Пересдача ЛР 2", 12, False),
                           ("Пересдача ЛР 5", 19, True)])
@@ -171,7 +158,6 @@ class CollectorTest(DigestCase):
         self.assertEqual((graded["submission"], graded["grade"]), ("submitted", "15.00000"))
         self.assertNotIn("ДЗ 1 — Кодирование", names(d["overdue"]))
         self.assertNotIn("ДЗ 1 — Кодирование", names(d["not_started"]))
-        # отзыв сохранён без оценки: Moodle шлёт grade -1 (ASSIGN_GRADE_NOT_SET) — не сдано
         queue(self.net)
         self.net.drop("mod_assign_get_submission_status", "assignid=13")
         status["feedback"] = {"grade": {"grade": "-1.00000"}}
@@ -200,7 +186,7 @@ class CollectorTest(DigestCase):
     def test_quizzes_updates_notifications(self):
         _, d = self.collect()
         q = {x["name"]: x for x in d["quizzes"]}
-        self.assertEqual(set(q), {"Тест после лекции №1", "Итоговый тест"})   # без срока и >30 дн
+        self.assertEqual(set(q), {"Тест после лекции №1", "Итоговый тест"})
         self.assertEqual((q["Тест после лекции №1"]["submission"],
                           q["Тест после лекции №1"]["open_attempt"],
                           q["Тест после лекции №1"]["attempts_used"],
@@ -213,11 +199,9 @@ class CollectorTest(DigestCase):
                            ["video.mp4", "big.zip"], ["https://example.org/"]),
                           ("(модуль 999)", "новые файлы", [], []),
                           ("Лекции", "новые файлы", ["lecture-01.pdf"], [])])
-        self.assertEqual([n["id"] for n in d["notifications"]], [902])   # без AUTO_EVENTS и старых
+        self.assertEqual([n["id"] for n in d["notifications"]], [902])
 
     def test_updates_by_snapshot(self):
-        # lecture-01.pptx старый (3 дня), но в снимке его не было — новый; ручку updates_since
-        # молчащей делаем нарочно: файл, открытый студентам, она тоже не покажет
         state = {**STATE, "files": {"1": [k for k in KEYS["1"] if "pptx" not in k], "2": []}}
         queue(self.net)
         self.net.drop("core_course_get_updates_since", "courseid=1")
@@ -239,8 +223,6 @@ class CollectorTest(DigestCase):
                          "ссылка → https://telemost.yandex.ru/j/1")
 
     def test_three_days(self):
-        """Полный цикл через снимок на диске: старый снимок без состава → состав записан →
-        назавтра в курсе появился файл 2020 года → сводка и --pull его видят → потом тишина."""
         def day(contents, since):
             queue(self.net)
             self.net.drop("core_course_get_contents", "courseid=1")
@@ -259,8 +241,8 @@ class CollectorTest(DigestCase):
         v2 = fixture("course_contents")
         v2[1]["modules"].append({"id": 124, "name": "Задание 2", "modname": "resource",
                                  "contents": [old]})
-        self.cfg.state_file().write_text(json.dumps(STATE), encoding="utf-8")   # без files
-        d = day(v1, NOW - DAY)   # снимок без состава: только по дате — свежие за сутки
+        self.cfg.state_file().write_text(json.dumps(STATE), encoding="utf-8")
+        d = day(v1, NOW - DAY)
         self.assertEqual([u["item"] for u in d["updates"]], ["Методичка 2", "Материалы", "Лекции"])
         self.assertEqual(json.loads(self.cfg.state_file().read_text(encoding="utf-8"))["files"],
                          KEYS)
@@ -284,7 +266,6 @@ class CollectorTest(DigestCase):
         self.assertEqual((d["tracked"], d["files"]), (True, []))
 
     def test_reopened_feedback(self):
-        # ЛР 1 вернули на доработку с отзывом: она в not_started и «Горит», отзыв — новый
         def run(state):
             queue(self.net)
             self.net.drop("mod_assign_get_submission_status", "assignid=11")
@@ -305,20 +286,19 @@ class CollectorTest(DigestCase):
         self.assertIn("\n## Отзывы\n", text)
         self.assertIn("| nettech | ЛР 1 — Vagrant и Packer | Переделать раздел 3: нет схемы сети. "
                       "|", text)
-        self.assertIn("- **ЛР 1 — Vagrant и Packer** · nettech", text)   # «Горит»
+        self.assertIn("- **ЛР 1 — Vagrant и Packer** · nettech", text)
         self.assertEqual(c.snapshot(d)["feedback"], {"11": "Переделать раздел 3: нет схемы сети."})
 
-        _, d = run(STATE)   # снимок без отзывов (старый) — отзыв есть, но не «новый»
+        _, d = run(STATE)
         self.assertFalse(next(a for a in d["deadlines"] if a["assign_id"] == 11)["feedback_new"])
         self.assertEqual(d["feedback"], [])
         _, d = run({**STATE, "feedback": {"11": "Переделать раздел 3: нет схемы сети."}})
-        self.assertEqual(d["feedback"], [])   # уже видели
+        self.assertEqual(d["feedback"], [])
 
     def test_announcements(self):
-        _, d = self.collect()   # снимок без announcements — по времени: только свежее 501
+        _, d = self.collect()
         self.assertEqual([(a["id"], a["author"], a["text"]) for a in d["announcements"]],
                          [(501, "Иванов Иван", "Лекция 3 пройдёт в пятницу, аудитория та же.")])
-        # снимок с id: 500 старое, но невиданное — показывается; 501 уже видели
         _, d = self.collect(state={**STATE, "announcements": {"1": [501], "2": []}})
         self.assertEqual([a["id"] for a in d["announcements"]], [500])
         self.assertIn("| 13.09 09:00 | nettech | **Консультация перед ЛР 3** · Иванов Иван: "
@@ -341,7 +321,6 @@ class CollectorTest(DigestCase):
         d = c.run()
         self.assertEqual([a["id"] for a in d["announcements"]], [501, 500])
         self.assertEqual([e["where"] for e in d["errors"]], ["объявления курса 2"])
-        # у курса 2 форум не прочитался — прежний список
         self.assertEqual(c.snapshot(d)["announcements"], {"1": [500, 501], "2": [7]})
 
     def test_offline_locked_extension(self):
@@ -355,19 +334,16 @@ class CollectorTest(DigestCase):
             d = c.run()
             return c, d, {a["short"]: a for a in d["overdue"] + d["deadlines"] + d["submitted"]}
 
-        # очное задание (плагинов ответа нет): не сдано, но слать нечего — не в «Горит»
         _, d, by = run(13, {"submissionsenabled": False})
         self.assertEqual(by["ДЗ 1 — Кодирование"]["submission"], "offline")
         self.assertIn("ДЗ 1 — Кодирование", names(d["overdue"]))
         self.assertNotIn("ДЗ 1 — Кодирование", names(d["not_started"]))
         self.assertIn("| **очно / без ответа в ТУИС** |", digest.render_digest(d))
-        # заблокировано преподавателем
         _, d, by = run(11, {"locked": True, "canedit": False})
         self.assertTrue(by["ЛР 1 — Vagrant и Packer"]["closed"])
         self.assertNotIn("ЛР 1 — Vagrant и Packer", names(d["not_started"]))
         self.assertIn("| ЛР 1 — Vagrant и Packer | nettech | заблокировано |",
                       digest.render_digest(d))
-        # индивидуальное продление: из просроченного — в сроки, снимок хранит исходный срок
         c, d, by = run(13, {"canedit": True, "extensionduedate": NOW + DAY})
         hw = by["ДЗ 1 — Кодирование"]
         self.assertEqual((hw["due"]["ts"], hw["closed"]), (NOW + DAY, False))
@@ -375,11 +351,9 @@ class CollectorTest(DigestCase):
         self.assertNotIn("ДЗ 1 — Кодирование", names(d["overdue"]))
         self.assertIn("ДЗ 1 — Кодирование", names(d["not_started"]))
         self.assertEqual(c.snapshot(d)["assignments"]["13"], DUE[-5])
-        self.assertNotIn("ДЗ 1 — Кодирование", names(d["moved"]))   # продление — не сдвиг срока
-        # продление за горизонт окна: не «просрочено» с будущей датой, а вне сводки
+        self.assertNotIn("ДЗ 1 — Кодирование", names(d["moved"]))
         _, d, _ = run(13, {"canedit": True, "extensionduedate": NOW + 40 * DAY})
         self.assertNotIn("ДЗ 1 — Кодирование", names(d["overdue"]) + names(d["deadlines"]))
-        # оценено очно до открытия приёма: «сдано», а не «откроется»
         st = fixture("submission_status_submitted")
         st["lastattempt"]["submission"]["status"] = "new"
         queue(self.net)
@@ -390,7 +364,6 @@ class CollectorTest(DigestCase):
         self.assertEqual((lab3["submission"], digest.status_of(lab3)), ("submitted", "сдано"))
 
     def test_status_without_due(self):
-        # оригинал без срока (duedate 0) с продлением: status() не падает и ставит срок
         self.net.reply("POST", "core_webservice_get_site_info", fixture("site_info"))
         self.net.reply("POST", "core_enrol_get_users_courses", fixture("users_courses"))
         c = digest.Collector(self.cfg, Moodle(self.cfg), 21, {})
@@ -407,12 +380,12 @@ class CollectorTest(DigestCase):
         g = {x["course"]["id"]: x for x in d["grades"]}
         self.assertEqual(g[1]["total"], {"raw": 17.5, "max": 100.0, "computed": False})
         self.assertEqual([(i["short"], i["raw"], i["new"]) for i in g[1]["items"]],
-                         [("ЛР 1", 8.0, False), ("ЛР 2", 9.5, True)])   # тест без балла выпал
+                         [("ЛР 1", 8.0, False), ("ЛР 2", 9.5, True)])
         self.assertEqual(g[2]["total"], {"raw": 10.0, "max": 100.0, "computed": True})
         self.assertTrue(g[2]["items"][0]["new"])
         self.assertEqual([(o["course"]["id"], o["count"], o["nearest"]["name"])
                           for o in d["outside"]],
-                         [(3, 1, "Курсовая")])   # курс 4 в COURSE_IGNORE — не показывается
+                         [(3, 1, "Курсовая")])
 
     def test_snapshot(self):
         c, d = self.collect()
@@ -428,7 +401,7 @@ class CollectorTest(DigestCase):
                                              "Сдать отчет по лабораторной работе № 2. DNS": 9.5},
                                        "2": {"Загрузка 1 лабораторной работы": 10.0}})
         self.assertEqual(s["files"], KEYS)
-        self.assertEqual(s["feedback"], {})   # в фикстурах отзывов нет
+        self.assertEqual(s["feedback"], {})
         self.assertEqual(s["announcements"], {"1": [500, 501], "2": []})
 
     def test_snapshot_keeps_files_of_unread_course(self):
@@ -438,7 +411,7 @@ class CollectorTest(DigestCase):
                        {"exception": "x", "errorcode": "invalidrecord", "message": "no"})
         c = digest.Collector(self.cfg, Moodle(self.cfg), 21, {**STATE, "files": KEYS})
         s = c.snapshot(c.run())
-        self.assertEqual(s["files"], KEYS)   # состав курса 2 не прочитался — прошлый список
+        self.assertEqual(s["files"], KEYS)
         self.assertIn("состав курса 2", [e["where"] for e in c.errors])
 
     def test_new_course(self):
@@ -449,8 +422,6 @@ class CollectorTest(DigestCase):
                       "или `COURSE_IGNORE` в config.env.", digest.render_digest(d))
 
     def test_hidden_assign_comes_from_contents(self):
-        """Задание с ограничением доступа mod_assign не отдаёт — сводка берёт его из состава
-        курса: ни assign_id, ни статуса ответа у него нет, только срок и «доступ закрыт»."""
         _, d = self.collect()
         a = next(x for x in d["deadlines"] if x["cmid"] == 115)
         self.assertEqual((a["source"], a["submission"], a.get("assign_id"), a["kind"]),
@@ -460,7 +431,7 @@ class CollectorTest(DigestCase):
     def test_course_without_code_is_reminded(self):
         _, d = self.collect()
         text = digest.render_digest(d)
-        self.assertEqual(d["new_courses"], [])   # курс 2 давно в снимке, а папки так и нет
+        self.assertEqual(d["new_courses"], [])
         self.assertIn("\nБез папки (файлы не скачиваются): Вычислительные методы (id 2) — "
                       "строка `CODE <id> <папка>` или `COURSE_IGNORE` в config.env.", text)
 
@@ -486,7 +457,6 @@ class CollectorTest(DigestCase):
         self.net.drop("gradereport_user_get_grade_items")
         self.net.reply("POST", ("gradereport_user_get_grade_items", "courseid=1"),
                        {"exception": "x", "errorcode": "invalidrecord", "message": "no"})
-        # выключенный показ оценок — настройка курса, не сбой: молча без строки в «Баллах»
         self.net.reply("POST", ("gradereport_user_get_grade_items", "courseid=2"),
                        {"exception": "x", "errorcode": "nopermissiontoviewgrades", "message": "no"})
         d = digest.Collector(self.cfg, Moodle(self.cfg), 21, STATE).run()
@@ -520,11 +490,10 @@ class CollectorTest(DigestCase):
         self.assertEqual([e["message"] for e in d["errors"]],
                          [".state.json повреждён, считаю первым запуском"])
         self.assertEqual(json.loads(self.cfg.state_file().read_text(encoding="utf-8"))["last_run"],
-                         NOW)   # сохранение вылечило файл
+                         NOW)
 
 
 class StateTest(DigestCase):
-    """`study state`: репозиторий курса на диске, релизы на хостингах, пара лаба ↔ задание."""
 
     def setUp(self):
         super().setUp()
@@ -572,7 +541,6 @@ class StateTest(DigestCase):
                       "релиз v1.1.0 на sourcecraft без файлов.", text)
 
     def test_file_flow_skips_repo_and_hostings(self):
-        # у file-курса репозиторий в папке не смотрится: ни git, ни хостингов (ответов нет)
         cfg = config(self.tmp, "COURSE_IGNORE=4\nCODE 1 nettech\nFLOW 1 file\n")
         d = digest.state(cfg, None, with_tuis=False)
         c = d["courses"][0]
@@ -594,7 +562,6 @@ class StateTest(DigestCase):
                                                 "videos": False, "submitted": False})
         self.assertEqual((self.tmp / "nettech/stash/002-dns.pdf").read_bytes(), b"%PDF-2")
         pulled = {u["item"]: u.get("pulled") for u in d["tuis"]["updates"]}
-        # у «(модуль 999)» файлов нет, у курса 2 нет папки — их не трогали
         self.assertEqual(pulled, {"Методичка 2": ["002-dns.pdf"], "Материалы": [],
                                   "(модуль 999)": None, "Лекции": None})
         self.assertEqual(d["errors"], [])

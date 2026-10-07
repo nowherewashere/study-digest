@@ -1,4 +1,3 @@
-"""`study setup`: ввод через input/getpass подменён очередями ответов, экраны — в StringIO."""
 import builtins
 import contextlib
 import getpass
@@ -67,9 +66,8 @@ class SetupCase(unittest.TestCase):
 class SetupTest(SetupCase):
     def test_tokens_saved_and_skipped(self):
         cfg = self.config()
-        # браузер, оператор, курсы (папка и сдача ×3; у второго курса сдача — r), pull
         self.answers = ["n", "", "", "nettech", "", "", "r", "", "", "n"]
-        (self.root / "nettech" / "course" / ".git").mkdir(parents=True)   # репозиторий → release?
+        (self.root / "nettech" / "course" / ".git").mkdir(parents=True)
         self.secrets = ["a" * 32, "", ""]
         self.moodle_ok()
         log, text, out = self.run_setup(cfg)
@@ -94,9 +92,8 @@ class SetupTest(SetupCase):
         self.assertIn(f"рабочая папка {self.root},\n  в Instructions - текст из "
                       f"{self.here / 'docs' / 'daily-digest-prompt.md'}", text)
         self.assertTrue((self.root / "nettech" / "stash").is_dir())
-        self.assertFalse((self.root / "2" / "tuis").exists())   # tuis/ заводит study answer
+        self.assertFalse((self.root / "2" / "tuis").exists())
         self.assertEqual(Config(cfg.path).codes(), {1: "nettech", 2: "2", 4: "4"})
-        # nettech: в папке уже есть репозиторий — авто release; 2 — ответ r; 4 — авто file
         self.assertEqual(Config(cfg.path).flows(), {1: "release", 2: "release", 4: "file"})
         self.assertIn("    сдача, release|file [release]: ", self.prompts)
         self.assertIn("    сдача, release|file [file]: ", self.prompts)
@@ -107,8 +104,8 @@ class SetupTest(SetupCase):
 
     def test_token_keep_replace_browser_and_moodle_down(self):
         cfg = self.config("TUIS_TOKEN=old\nGITVERSE_TOKEN=gv-old\n")
-        self.answers = ["y", "n", "y", "claude bogus"]   # браузер, оставить, заменить, оператор
-        self.secrets = ["gv-new", ""]                   # GitVerse новый, SourceCraft пропущен
+        self.answers = ["y", "n", "y", "claude bogus"]
+        self.secrets = ["gv-new", ""]
         self.net.reply("POST", "core_webservice_get_site_info", INVALID)
         self.net.reply("POST", "core_webservice_get_site_info", INVALID)
         log, text, _ = self.run_setup(cfg)
@@ -142,7 +139,7 @@ class SetupTest(SetupCase):
         cfg = self.config()
         patch(self, setup, "open_url", lambda _: False)
         self.answers = ["", ""]
-        self.secrets = ["", "", ""]   # токена нет — Moodle не спрашивается вовсе
+        self.secrets = ["", "", ""]
         log, _, _ = self.run_setup(cfg)
         self.assertIn(["warn", "Токены", "не открылось: перейди по ссылке вручную"], log)
         self.assertIn(["warn", "Токены",
@@ -162,19 +159,17 @@ class SetupTest(SetupCase):
         self.assertIn(["ok", "Проверка", "Moodle отвечает: Студент Тестовый"], log)
         self.assertTrue(any(x[2].startswith("команда study: ") for x in log))
         self.assertIn("папки курсов появятся на шаге «Курсы»", out)
-        self.assertNotIn("\033[", out + text)   # без терминала — без цветов и очистки экрана
+        self.assertNotIn("\033[", out + text)
 
     def test_operators_dirs_and_pull(self):
         (self.root / "CLAUDE.md").write_text("# Моё\n", encoding="utf-8")
-        (self.root / "nettech" / "course" / ".git").mkdir(parents=True)   # репозиторий → release
+        (self.root / "nettech" / "course" / ".git").mkdir(parents=True)
         cfg = self.config("TUIS_TOKEN=t\nCODE 1 nettech\n")
-        # на шаге «Каталоги» сети нет: название курса для заготовки NOTES.md — из снимка
         (self.here / ".state.json").write_text(
             json.dumps({"last_run": 1, "courses": {"1": "Сетевые технологии"}}), encoding="utf-8")
-        # операторы; курсы: старые в игнор, готово, два имени папок и два профиля; скачать
         self.answers = ["claude codex", "s", "", "", "", "", "", "y"]
         self.moodle_ok()
-        self.net.reply("POST", "core_enrol_get_users_courses", fixture("users_courses"))  # pull
+        self.net.reply("POST", "core_enrol_get_users_courses", fixture("users_courses"))
         self.net.reply("POST", ("core_course_get_contents", "courseid=1"),
                        fixture("course_contents"))
         self.net.reply("GET", "002-dns.pdf", b"%PDF-2")
@@ -182,22 +177,21 @@ class SetupTest(SetupCase):
         self.net.reply("POST", ("core_course_get_contents", "courseid=2"),
                        fixture("course_contents_small"))
         self.net.reply("GET", "lecture-01.pdf", b"%PDF")
-        with mock.patch.object(setup, "tokens", lambda *_: None):   # токены не спрашиваем
+        with mock.patch.object(setup, "tokens", lambda *_: None):
             log, _, out = self.run_setup(cfg)
         self.assertIn(["ok", "Каталоги", f"{self.root / 'nettech'}{os.sep}{{stash,NOTES.md}}"], log)
         self.assertIn(["ok", "Каталоги", f"снимок состояния сводки: {self.here}"], log)
         notes = (self.root / "nettech" / "NOTES.md").read_text(encoding="utf-8")
         self.assertTrue(notes.startswith("# Сетевые технологии — заметки\n"))
         self.assertIn("Курс в ТУИС: `1`", notes)
-        self.assertIn("Сдача: релиз репозитория со скринкастами", notes)   # в папке репозиторий
+        self.assertIn("Сдача: релиз репозитория со скринкастами", notes)
         self.assertIn(["ok", "Оператор", "поставлено: claude codex"], log)
         claude = (self.root / "CLAUDE.md").read_text(encoding="utf-8")
         self.assertTrue(claude.startswith("# Моё\n\n" + agent.BEGIN))
         self.assertIn(agent.BEGIN, (self.root / "AGENTS.md").read_text(encoding="utf-8"))
-        self.assertIn("  код      файл", out)   # таблица операторов с отступом
+        self.assertIn("  код      файл", out)
         self.assertEqual(Config(cfg.path).ignore(), {4})
         self.assertIn(["ok", "Курсы", "записаны в config.env: 2 папок"], log)
-        # курс 2 получил папку «2» на шаге «Курсы» — заготовка с названием из ТУИС
         self.assertTrue((self.root / "2" / "NOTES.md").read_text(encoding="utf-8")
                         .startswith("# Вычислительные методы — заметки\n"))
         self.assertTrue(notes == (self.root / "nettech" / "NOTES.md").read_text(encoding="utf-8"))
@@ -290,10 +284,10 @@ class LinkTest(unittest.TestCase):
     @unittest.skipUnless(os.name == "posix", "симлинк")
     def test_symlink(self):
         self.bin.mkdir(parents=True)
-        (self.bin / "study").write_text("old", encoding="utf-8")   # старый файл заменяется
+        (self.bin / "study").write_text("old", encoding="utf-8")
         self.assertEqual(setup.link_command(), f"~/.local/bin/study -> {self.here / 'study'}")
         self.assertEqual(os.readlink(self.bin / "study"), str(self.here / "study"))
-        setup.link_command()   # повтор не падает
+        setup.link_command()
         self.assertTrue((self.bin / "study").is_symlink())
 
     @unittest.skipUnless(os.name == "nt", "study.cmd")
@@ -358,11 +352,11 @@ class NotesStubTest(unittest.TestCase):
         for head in ("## Задания и сроки", "## Ключевые находки", "## Лабы"):
             self.assertIn(head, text)
         self.assertIsNone(courses.notes_stub("nettech", 1, "Другое"))
-        self.assertEqual(p.read_text(encoding="utf-8"), text)   # повтор не трогает
+        self.assertEqual(p.read_text(encoding="utf-8"), text)
         (root / "bpm").mkdir()
         (root / "bpm" / "NOTES.md").write_text("# Моё\n", encoding="utf-8")
         self.assertIsNone(courses.notes_stub("bpm", 5))
         self.assertEqual((root / "bpm" / "NOTES.md").read_text(encoding="utf-8"), "# Моё\n")
         text = courses.notes_stub("x", 9).read_text(encoding="utf-8")
-        self.assertTrue(text.startswith("# x — заметки"))   # без названия — код папки
+        self.assertTrue(text.startswith("# x — заметки"))
         self.assertIn("Сдача: не задано (FLOW в config.env)", text)
