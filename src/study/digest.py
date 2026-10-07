@@ -77,9 +77,9 @@ def originals(retakes, items):
 def retake_info(retakes, items):
     return {cmid: {"retake_of": orig["assign_id"] if orig else None,
                    "needed": orig is None or (orig["submission"] != "submitted"
-                                              and not orig.get("graded")
+                                              and not orig["graded"]
                                               and (not orig["due"] or orig["due"]["overdue"]
-                                                   or orig.get("closed")))}
+                                                   or orig["closed"]))}
             for cmid, orig in originals(retakes, items).items()}
 
 
@@ -99,7 +99,7 @@ def deadline_sections(soon, overdue):
         "submitted": [a for a in late if not pending(a)],
         "not_started": [a for a in late + deadlines
                         if a["source"] == "assign_api" and a["submission"] in PENDING
-                        and not a.get("closed")],
+                        and not a["closed"]],
         "feedback": [a for a in live if a.get("feedback_new")],
         "retakes": [{"assign_id": a.get("assign_id"), "cmid": a["cmid"], "short": a["short"],
                      "course": a["course"], "due": a["due"], "retake_of": a["retake_of"],
@@ -239,7 +239,7 @@ class Collector:
         for course in self.courses.values():
             works = [w for w in self.reg.works(course) if w.cmid not in seen]
             works += self.reg.modules(course, others)
-            out += [w.as_item(self.now) for w in works
+            out += [w.item(self.now) for w in works
                     if w.due and in_window(w.due, self.now, self.horizon)]
         return out
 
@@ -353,7 +353,7 @@ class Collector:
         now, fb = self.now, self.state.get("feedback")
         works = [w for c in self.courses.values() for w in self.reg.works(c, contents=False)]
         raw = {w.assign_id: w.raw for w in works}
-        base = {str(w.assign_id): w.as_item(now) for w in works}
+        base = {str(w.assign_id): w.item(now) for w in works}
         new_ids, moved = changes(base, self.state.get("assignments", {}), self.since, now)
 
         live = by_due([base[i] for i in live_ids(base, now, self.horizon)])

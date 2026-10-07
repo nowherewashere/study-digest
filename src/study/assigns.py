@@ -20,20 +20,10 @@ class Work:
     course: Course
     cmid: int
     name: str
-    source: str
-    assign_id: Optional[int] = None
-    modname: str = "assign"
-    due: Optional[int] = None
-    opens: Optional[int] = None
-    section: str = ""
-    intro: str = ""
-    visible: bool = True
-    reason: str = ""
-    raw: dict = field(default_factory=dict)
-
-    @property
-    def available(self):
-        return self.assign_id is not None
+    due: Optional[int]
+    opens: Optional[int]
+    intro: str
+    raw: dict = field(repr=False)
 
     @property
     def lab(self):
@@ -52,23 +42,63 @@ class Work:
     def short(self):
         return short_name(self.name)
 
-    def as_item(self, now):
-        base = {"cmid": self.cmid, "course": self.course.as_dict(), "name": self.name,
+    def facts(self, now):
+        return {"cmid": self.cmid, "course": self.course.as_dict(), "name": self.name,
                 "short": self.short, "due": moment(self.due, now), "lab": self.lab,
-                "retake": self.retake}
-        if self.source == "assign_api":
-            return dict(base, kind="assign", source=self.source, assign_id=self.assign_id,
-                        submission=None, intro=plain(self.intro), graded=False, closed=False,
-                        opens=None, canedit=None, locked=False)
-        return dict(base, kind="activity", source=self.source, modname=self.modname, intro="",
-                    submission="hidden" if self.modname == "assign" else None)
+                "retake": self.retake, "source": self.source}
+
+
+@dataclass
+class Assign(Work):
+
+    assign_id: int
+
+    source = "assign_api"
+    available = True
+    section = ""
+    visible = True
+    reason = ""
+
+    def as_item(self, now):
+        return dict(self.facts(now), kind="assign", assign_id=self.assign_id,
+                    intro=plain(self.intro))
+
+    def item(self, now):
+        return {**self.as_item(now), **unfetched_fields()}
+
+
+@dataclass
+class Module(Work):
+
+    modname: str
+    section: str
+    visible: bool
+    reason: str
+
+    source = "course_contents"
+    available = False
+    assign_id = None
+
+    def as_item(self, now):
+        return dict(self.facts(now), kind="activity", modname=self.modname, intro="")
+
+    def item(self, now):
+        return {**self.as_item(now), **locked_fields(self)}
+
+
+def unfetched_fields():
+    return {"submission": None, "graded": False, "closed": False, "opens": None,
+            "canedit": None, "locked": False}
+
+
+def locked_fields(work):
+    return {"submission": "hidden" if work.modname == "assign" else None}
 
 
 def from_api(course, a):
-    return Work(course=course, cmid=a["cmid"], name=a["name"], source="assign_api",
-                assign_id=a["id"], due=a.get("duedate") or None,
-                opens=a.get("allowsubmissionsfromdate") or None,
-                intro=a.get("intro") or "", raw=a)
+    return Assign(course=course, cmid=a["cmid"], name=a["name"], assign_id=a["id"],
+                  due=a.get("duedate") or None, opens=a.get("allowsubmissionsfromdate") or None,
+                  intro=a.get("intro") or "", raw=a)
 
 
 def date_of(module, ids):
@@ -79,12 +109,12 @@ def date_of(module, ids):
 
 
 def from_module(course, m, section=""):
-    return Work(course=course, cmid=m["id"], name=m.get("name") or "", source="course_contents",
-                modname=m.get("modname") or "", due=date_of(m, DATE_IDS),
-                opens=date_of(m, OPEN_IDS), section=section,
-                intro=plain(m.get("description"), 20000),
-                visible=bool(m.get("uservisible", True)),
-                reason=plain(m.get("availabilityinfo"), 500), raw=m)
+    return Module(course=course, cmid=m["id"], name=m.get("name") or "",
+                  modname=m.get("modname") or "", due=date_of(m, DATE_IDS),
+                  opens=date_of(m, OPEN_IDS), section=section,
+                  intro=plain(m.get("description"), 20000),
+                  visible=bool(m.get("uservisible", True)),
+                  reason=plain(m.get("availabilityinfo"), 500), raw=m)
 
 
 class Registry:

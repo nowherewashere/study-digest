@@ -100,10 +100,10 @@ class RegistryTest(MoodleCase):
                          {(116, "choice"), (118, "feedback")})
         self.assertEqual(next(m for m in mods if m.cmid == 118).due, 1790110740)
 
-    def test_as_item_keeps_digest_shape(self):
+    def test_item_keeps_digest_shape(self):
         r = self.both()
-        api = next(x for x in r.works(self.course) if x.cmid == 111).as_item(1789538400)
-        hidden = next(x for x in r.works(self.course) if x.cmid == 115).as_item(1789538400)
+        api = next(x for x in r.works(self.course) if x.cmid == 111).item(1789538400)
+        hidden = next(x for x in r.works(self.course) if x.cmid == 115).item(1789538400)
         self.assertEqual((api["kind"], api["source"], api["assign_id"], api["submission"]),
                          ("assign", "assign_api", 11, None))
         self.assertEqual(api["short"], "ЛР 1 — Vagrant и Packer")
