@@ -207,12 +207,12 @@ class CollectorTest(DigestCase):
                           q["Тест после лекции №1"]["timelimit_min"]), ("submitted", False, 1, 30))
         self.assertEqual((q["Итоговый тест"]["submission"], q["Итоговый тест"]["open_attempt"],
                           q["Итоговый тест"]["attempts_max"]), (None, True, None))
-        self.assertEqual([(u["item"], u["what"], u["files"]) for u in d["updates"]],
-                         [("Методичка 2", "новые файлы", ["002-dns.pdf"]),
+        self.assertEqual([(u["item"], u["what"], u["files"], u["links"]) for u in d["updates"]],
+                         [("Методичка 2", "новые файлы", ["002-dns.pdf"], []),
                           ("Материалы", "изменены настройки",
-                           ["video.mp4", "big.zip", "Ссылка → https://example.org/"]),
-                          ("(модуль 999)", "новые файлы", []),
-                          ("Лекции", "новые файлы", ["lecture-01.pdf"])])
+                           ["video.mp4", "big.zip"], ["https://example.org/"]),
+                          ("(модуль 999)", "новые файлы", [], []),
+                          ("Лекции", "новые файлы", ["lecture-01.pdf"], [])])
         self.assertEqual([n["id"] for n in d["notifications"]], [902])   # без AUTO_EVENTS и старых
 
     def test_updates_by_snapshot(self):
@@ -224,12 +224,19 @@ class CollectorTest(DigestCase):
         self.net.reply("POST", ("core_course_get_updates_since", "courseid=1"),
                        {"instances": [], "warnings": []})
         d = digest.Collector(self.cfg, Moodle(self.cfg), 21, state).run()
-        self.assertEqual([(u["item"], u["what"], u["files"]) for u in d["updates"]],
-                         [("Методичка 2", "новые файлы", ["002-dns.pdf"]),
+        self.assertEqual([(u["item"], u["what"], u["files"], u["links"]) for u in d["updates"]],
+                         [("Методичка 2", "новые файлы", ["002-dns.pdf"], []),
                           ("Материалы", "новые файлы",
-                           ["lecture-01.pptx", "video.mp4", "big.zip",
-                            "Ссылка → https://example.org/"]),
-                          ("Лекции", "новые файлы", ["lecture-01.pdf"])])
+                           ["lecture-01.pptx", "video.mp4", "big.zip"],
+                           ["https://example.org/"]),
+                          ("Лекции", "новые файлы", ["lecture-01.pdf"], [])])
+
+    def test_link_only_row(self):
+        u = {"course": {"code": "nettech", "title": "Сети"}, "section": "Общее",
+             "item": "Ссылка на собрание", "what": "изменены настройки",
+             "files": [], "links": ["https://telemost.yandex.ru/j/1"]}
+        self.assertEqual(digest.news_rows({"updates": [u]})[0][3],
+                         "ссылка → https://telemost.yandex.ru/j/1")
 
     def test_three_days(self):
         """Полный цикл через снимок на диске: старый снимок без состава → состав записан →
@@ -594,7 +601,7 @@ class StateTest(DigestCase):
         text = digest.render(d)
         self.assertIn("| nettech | Лабораторные работы | Методичка 2: новые файлы | 002-dns.pdf |",
                       text)
-        self.assertIn("video.mp4, big.zip, Ссылка → https://example.org/ — не скачаны", text)
+        self.assertIn("video.mp4, big.zip — не скачаны; ссылка → https://example.org/", text)
         self.assertIn("lecture-01.pdf — у курса нет папки", text)
 
     def test_hosting_error_is_soft(self):

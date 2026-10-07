@@ -33,7 +33,7 @@ def pending(a):
 def news(course, m, section, what):
     """Строка «Новое в курсах» для модуля курса."""
     return {"course": course, "section": section, "item": m["name"],
-            "modname": m.get("modname", ""), "files": [], "what": what}
+            "modname": m.get("modname", ""), "files": [], "links": [], "what": what}
 
 
 def by_due(items):
@@ -247,12 +247,15 @@ class Collector:
                                      "новые файлы" if kinds & FILES else "изменены настройки")
             # имена файлов — чтобы сводка говорила «появился 002-dns.pdf», а не «новые файлы»
             for mid, (m, section) in modules.items():
-                new_files = [files.label(c) for c in m.get("contents") or []
-                             if ((files.is_file(c) and c.get("filesize")) or files.is_link(c))
-                             and files.fresh(m, c, self.since, known)]
-                if new_files:
-                    rows.setdefault(mid, news(course, m, section, "новые файлы"))
-                    rows[mid]["files"] = new_files
+                fresh = [c for c in m.get("contents") or []
+                         if files.fresh(m, c, self.since, known)]
+                new_files = [files.label(c) for c in fresh
+                             if files.is_file(c) and c.get("filesize")]
+                links = [c["fileurl"] for c in fresh if files.is_link(c)]
+                if new_files or links:
+                    rows.setdefault(mid, news(course, m, section,
+                                              "новые файлы" if new_files else "новая ссылка"))
+                    rows[mid]["files"], rows[mid]["links"] = new_files, links
             out.extend(rows.values())
         return out
 
@@ -486,12 +489,15 @@ def news_rows(t):
         if u.get("pulled"):
             files_ = ", ".join(u["pulled"])
         elif not u["files"]:
-            files_ = "—"
+            files_ = ""
         elif u["course"]["code"]:
             files_ = ", ".join(u["files"]) + " — не скачаны"
         else:
             files_ = ", ".join(u["files"]) + " — у курса нет папки (CODE в config.env)"
-        rows.append([label(u), u["section"] or "—", f"{u['item']}: {u['what']}", files_])
+        parts = [files_] if files_ else []
+        parts += ["ссылка → " + url for url in u.get("links", [])]
+        rows.append([label(u), u["section"] or "—", f"{u['item']}: {u['what']}",
+                     "; ".join(parts) or "—"])
     for a in t.get("new_assignments", []):
         rows.append([label(a), "—", f"новое задание: {a['short']}, до {when(a['due'])}", "—"])
     for a in t.get("moved", []):
