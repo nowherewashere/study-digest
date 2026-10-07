@@ -5,7 +5,7 @@ from . import local
 from .assigns import SUBMISSION, Registry
 from .config import ROOT, soft
 from .fmt import failures, moment, plain
-from .moodle import PENDING, accepts, accepts_line, submission_state
+from .moodle import PENDING, accepts, accepts_line, comment_rows, submission_state
 
 
 def on_disk(cfg, code, num, flow):
@@ -45,12 +45,19 @@ def build(cfg, moodle, course, what):
         return dict(d, due=moment(w.due), opens=moment(w.opens), closed=True, locked=False,
                     canedit=False, team=False, graded=False, accepts=None, accepts_line="—",
                     intro=w.intro, attachments=[], grade=None, grade_text=None, feedback=None,
+                    comments=[],
                     submission={"status": "hidden", "attempt": None, "modified": None})
     a = w.raw
     st = moodle.submission_status(w.assign_id)
     sub = (st.get("lastattempt") or {}).get("submission") or {}
     fb = st.get("feedback") or {}
-    s = submission_state(a, st, int(time.time()))
+    now = int(time.time())
+    s = submission_state(a, st, now)
+    comments = []
+    if s["submission_id"]:
+        with soft(errors, f"комментарии к ответу {w.assign_id}"):
+            comments = comment_rows(moodle.comments(w.cmid, s["submission_id"]),
+                                    moodle.me()["userid"])
     acc = accepts(a)
     return dict(d, due=moment(s["due"]), opens=moment(s["opens"]), closed=s["closed"],
                 locked=s["locked"], canedit=s["canedit"], team=s["team"], graded=s["graded"],
@@ -62,7 +69,9 @@ def build(cfg, moodle, course, what):
                             "modified": moment(sub.get("timemodified"))},
                 grade=s["grade"],
                 grade_text=fb.get("gradefordisplay") if s["grade"] is not None else None,
-                feedback=s["feedback"])
+                feedback=s["feedback"],
+                comments=[{"author": c["author"], "time": moment(c["time"], now),
+                           "text": c["text"]} for c in comments])
 
 
 def disk_line(d):
@@ -108,6 +117,8 @@ def render(d):
            "Принимает: " + d["accepts_line"], "Состояние: " + state]
     if d["feedback"]:
         out.append("Отзыв: " + d["feedback"])
+    for c in d["comments"]:
+        out.append("Комментарий · {} · {}: {}".format(c["author"], c["time"]["full"], c["text"]))
     if disk_line(d):
         out.append(disk_line(d))
     if d["stash"]:

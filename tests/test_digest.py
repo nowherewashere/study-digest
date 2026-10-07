@@ -29,6 +29,7 @@ def queue(net, since=True):
                         (21, "team"), (19, "closed"), (20, "new")):
         net.reply("POST", ("mod_assign_get_submission_status", f"assignid={aid}"),
                   fixture(f"submission_status_{status}"))
+    net.reply("POST", ("core_comment_get_comments", "itemid=5001"), fixture("comments_empty"))
     net.reply("POST", ("core_course_get_contents", "courseid=1"), fixture("course_contents"))
     net.reply("POST", ("core_course_get_contents", "courseid=2"),
               fixture("course_contents_small"))
@@ -272,6 +273,8 @@ class CollectorTest(DigestCase):
             self.net.drop("mod_assign_get_submission_status", "assignid=11")
             self.net.reply("POST", ("mod_assign_get_submission_status", "assignid=11"),
                            fixture("submission_status_reopened"))
+            self.net.reply("POST", ("core_comment_get_comments", "itemid=5003"),
+                           fixture("comments_thread"))
             d, snap = digest.Collector(self.cfg, Moodle(self.cfg), 21, state).gather()
             return snap, d
 
@@ -295,6 +298,49 @@ class CollectorTest(DigestCase):
         self.assertEqual(d["feedback"], [])
         _, d = run({**STATE, "feedback": {"11": "Переделать раздел 3: нет схемы сети."}})
         self.assertEqual(d["feedback"], [])
+
+    def test_submission_comments(self):
+        def run(state, thread="comments_thread"):
+            queue(self.net)
+            self.net.drop("mod_assign_get_submission_status", "assignid=11")
+            self.net.reply("POST", ("mod_assign_get_submission_status", "assignid=11"),
+                           fixture("submission_status_reopened"))
+            self.net.reply("POST", ("core_comment_get_comments", "itemid=5003"), fixture(thread))
+            return digest.Collector(self.cfg, Moodle(self.cfg), 21, state).gather()
+
+        d, snap = run({**STATE, "comments": {}})
+        lab = next(a for a in d["deadlines"] if a["assign_id"] == 11)
+        self.assertEqual([(c["author"], c["text"]) for c in lab["comments"]],
+                         [("Иван Петров", "Добавьте схему сети."),
+                          ("Студент Тестов", "Добавил, проверьте.")])
+        self.assertEqual([c["id"] for c in lab["comments_new"]], [801])
+        self.assertEqual([a["assign_id"] for a in d["comments"]], [11])
+        text = digest.render_digest(d)
+        self.assertIn("\n## Комментарии к ответам\n", text)
+        self.assertIn("| nettech | ЛР 1 — Vagrant и Packer | Иван Петров | Добавьте схему сети. |",
+                      text)
+        self.assertNotIn("Добавил, проверьте. |", text)
+        self.assertEqual(snap["comments"], {"11": [801, 802]})
+
+        d, _ = run({**STATE, "comments": {"11": [801, 802]}})
+        self.assertEqual(d["comments"], [])
+        self.assertNotIn("Комментарии к ответам", digest.render_digest(d))
+        d, _ = run(STATE)
+        self.assertEqual(d["comments"], [])
+        d, snap = run({**STATE, "comments": {"11": [801]}}, "comments_thread")
+        self.assertEqual(d["comments"], [])
+
+    def test_submission_comments_soft_error(self):
+        queue(self.net)
+        self.net.drop("mod_assign_get_submission_status", "assignid=11")
+        self.net.reply("POST", ("mod_assign_get_submission_status", "assignid=11"),
+                       fixture("submission_status_reopened"))
+        self.net.reply("POST", ("core_comment_get_comments", "itemid=5003"),
+                       {"exception": "x", "errorcode": "nopermission", "message": "нет прав"})
+        d = digest.Collector(self.cfg, Moodle(self.cfg), 21, {**STATE, "comments": {}}).run()
+        lab = next(a for a in d["deadlines"] if a["assign_id"] == 11)
+        self.assertEqual((lab["comments"], lab["submission"]), ([], "reopened"))
+        self.assertEqual([e["where"] for e in d["errors"]], ["комментарии к ответу 11"])
 
     def test_announcements(self):
         _, d = self.collect()
@@ -360,6 +406,8 @@ class CollectorTest(DigestCase):
         queue(self.net)
         self.net.drop("mod_assign_get_submission_status", "assignid=15")
         self.net.reply("POST", ("mod_assign_get_submission_status", "assignid=15"), st)
+        self.net.reply("POST", ("core_comment_get_comments", "itemid=5001"),
+                       fixture("comments_empty"))
         d = digest.Collector(self.cfg, Moodle(self.cfg), 21, STATE).run()
         lab3 = next(a for a in d["deadlines"] if a["assign_id"] == 15)
         self.assertEqual((lab3["submission"], digest.status_of(lab3)), ("submitted", "сдано"))

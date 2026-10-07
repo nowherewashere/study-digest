@@ -4,7 +4,7 @@ from . import files, hosting, local, snapshot, update
 from .assigns import KINDS, SUBMISSION, Registry
 from .config import Course, StudyError, soft
 from .fmt import failures, md_table, moment, plain, short_name, weekday
-from .moodle import PENDING, submission_state
+from .moodle import PENDING, comment_rows, submission_state
 from .snapshot import load_state, save_state
 
 USEFUL = {"contentfiles", "introfiles", "configuration", "contents", "files"}
@@ -52,7 +52,7 @@ def changes(items, known, since, now):
     return new, moved
 
 
-def with_submission(item, s, fb, now):
+def with_submission(item, s, fb, now, cm=None):
     due = item["due"]
     if s["due"] and s["due"] != (due or {}).get("ts"):
         due = moment(s["due"], now)
@@ -61,11 +61,15 @@ def with_submission(item, s, fb, now):
             "locked": s["locked"], "opens": moment(s["opens"], now) if s["opens"] else None,
             "due": due,
             "feedback_new": bool(s["feedback"]) and fb is not None
-            and fb.get(str(item["assign_id"])) != s["feedback"]}
+            and fb.get(str(item["assign_id"])) != s["feedback"],
+            "comments": [{**c, "time": moment(c["time"], now)} for c in s.get("comments", [])],
+            "comments_new": [{**c, "time": moment(c["time"], now)} for c in s.get("comments", [])
+                             if cm is not None and not c["own"]
+                             and c["id"] not in (cm.get(str(item["assign_id"])) or [])]}
 
 
-def with_statuses(items, statuses, fb, now):
-    return {i: with_submission(a, statuses[a["assign_id"]], fb, now)
+def with_statuses(items, statuses, fb, now, cm=None):
+    return {i: with_submission(a, statuses[a["assign_id"]], fb, now, cm)
             if statuses.get(a["assign_id"]) else a for i, a in items.items()}
 
 
@@ -101,6 +105,7 @@ def deadline_sections(soon, overdue):
                         if a["source"] == "assign_api" and a["submission"] in PENDING
                         and not a["closed"]],
         "feedback": [a for a in live if a.get("feedback_new")],
+        "comments": [a for a in live if a.get("comments_new")],
         "retakes": [{"assign_id": a.get("assign_id"), "cmid": a["cmid"], "short": a["short"],
                      "course": a["course"], "due": a["due"], "retake_of": a["retake_of"],
                      "needed": a["needed"]} for a in live if a.get("retake")],
@@ -231,7 +236,16 @@ class Collector:
             with self.soft(f"статус задания {aid}"):
                 out[aid] = submission_state(raw[aid], self.moodle.submission_status(aid),
                                             self.now)
+            out[aid] = out[aid] and {**out[aid], "comments": self.comments(a, out[aid])}
         return out
+
+    def comments(self, a, s):
+        if not s["submission_id"]:
+            return []
+        with self.soft(f"комментарии к ответу {a['assign_id']}"):
+            return comment_rows(self.moodle.comments(a["cmid"], s["submission_id"]),
+                                self.moodle.me()["userid"])
+        return []
 
     def activity_items(self, seen):
         others = set(KINDS) - {"assign"}
@@ -351,6 +365,7 @@ class Collector:
 
     def gather(self):
         now, fb = self.now, self.state.get("feedback")
+        cm = self.state.get("comments")
         works = [w for c in self.courses.values() for w in self.reg.works(c, contents=False)]
         raw = {w.assign_id: w.raw for w in works}
         base = {str(w.assign_id): w.item(now) for w in works}
@@ -359,12 +374,12 @@ class Collector:
         live = by_due([base[i] for i in live_ids(base, now, self.horizon)])
         retakes = [a for a in live if a["retake"]]
         st = self.fetch_statuses([a for a in live if not a["retake"]], raw, {})
-        items = with_statuses(base, st, fb, now)
+        items = with_statuses(base, st, fb, now, cm)
         st = self.fetch_statuses([o for o in originals(retakes, items).values() if o], raw, st)
-        items = with_statuses(base, st, fb, now)
+        items = with_statuses(base, st, fb, now, cm)
         info = retake_info(retakes, items)
         st = self.fetch_statuses([a for a in retakes if info[a["cmid"]]["needed"]], raw, st)
-        items = with_statuses(base, st, fb, now)
+        items = with_statuses(base, st, fb, now, cm)
         ids = [str(a["assign_id"]) for a in live]
         soon_ids = [i for i in ids if in_window(items[i]["due"]["ts"], now, self.horizon)]
         late_ids = [i for i in ids if items[i]["due"]["ts"] < now]
@@ -372,7 +387,7 @@ class Collector:
         extras = self.activity_items({a["cmid"] for a in base.values()})
         later = [a for a in extras if a["source"] == "course_contents" and a["retake"]]
         st = self.fetch_statuses([o for o in originals(later, items).values() if o], raw, st)
-        items = with_statuses(base, st, fb, now)
+        items = with_statuses(base, st, fb, now, cm)
         info = {**info, **retake_info(later, items)}
         picks = self.fetch_choices(extras)
 
@@ -405,7 +420,9 @@ class Collector:
             {str(g["course"]["id"]): {i["name"]: i["raw"] for i in g["items"]} for g in grades},
             {str(cid): files.keys(c) for cid, c in self._contents.items() if c is not None},
             seen,
-            {str(a["assign_id"]): a["feedback"] for a in items.values() if a.get("feedback")})
+            {str(a["assign_id"]): a["feedback"] for a in items.values() if a.get("feedback")},
+            {str(a["assign_id"]): [c["id"] for c in a["comments"]] for a in items.values()
+             if a.get("comments")})
         return data, snap
 
 
@@ -580,6 +597,9 @@ def render(d):
         ("Баллы", grade_rows(t), ["Курс", "Итого", "Новое"]),
         ("Отзывы", [[label(a), a["short"], a["feedback"]] for a in t.get("feedback", [])],
          ["Курс", "Работа", "Отзыв преподавателя"]),
+        ("Комментарии к ответам",
+         [[label(a), a["short"], c["author"], c["text"]] for a in t.get("comments", [])
+          for c in a["comments_new"]], ["Курс", "Работа", "Автор", "Комментарий"]),
         ("Уведомления", [[n["at"]["text"], n["subject"]] for n in t.get("notifications", [])],
          ["Когда", "Тема"]),
         ("Объявления", [[a["at"]["text"], label(a), announcement(a)]

@@ -52,6 +52,11 @@ class Moodle:
     def submission_status(self, assignid):
         return self.call("mod_assign_get_submission_status", assignid=assignid)
 
+    def comments(self, cmid, submission_id):
+        return self.call("core_comment_get_comments", contextlevel="module", instanceid=cmid,
+                         component="assignsubmission_comments", itemid=submission_id,
+                         area="submission_comments")
+
     def forums(self, courseids):
         return self.call("mod_forum_get_forums_by_courses", courseids=courseids)
 
@@ -176,6 +181,13 @@ def feedback_text(status):
     return None
 
 
+def comment_rows(out, me=None):
+    rows = [{"id": c["id"], "author": c.get("fullname") or "", "time": c.get("timecreated") or 0,
+             "text": plain(c.get("content"), 2000), "own": me is not None and c.get("userid") == me}
+            for c in (out or {}).get("comments") or []]
+    return sorted(rows, key=lambda c: (c["time"], c["id"]))
+
+
 def submission_state(assign, st, now):
     la = st.get("lastattempt") or {}
     status = (la.get("submission") or {}).get("status") or "new"
@@ -196,7 +208,8 @@ def submission_state(assign, st, now):
     opens = assign.get("allowsubmissionsfromdate") or 0
     opens = opens if opens > now else 0
     canedit = la.get("canedit")
-    return {"status": status, "grade": grade, "feedback": feedback_text(st), "graded": graded,
+    return {"status": status, "submission_id": (la.get("submission") or {}).get("id") or None,
+            "grade": grade, "feedback": feedback_text(st), "graded": graded,
             "closed": canedit is False and not opens and status in PENDING,
             "locked": bool(la.get("locked")), "opens": opens or None, "due": due or None,
             "cutoff": cutoff or None, "canedit": canedit, "team": team}

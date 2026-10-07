@@ -83,11 +83,12 @@ def merge_known(old, fresh, keys):
     return {k: fresh[k] if k in fresh else (old or {}).get(k, []) for k in keys}
 
 
-def build(now, old, titles, due, grades, fresh_files, seen, feedback):
+def build(now, old, titles, due, grades, fresh_files, seen, feedback, comments=None):
     announced = old.get("announcements") or {}
     fresh_seen = {str(cid): sorted(set(announced.get(str(cid), [])) | set(ids))[-50:]
                   for cid, ids in seen.items()}
     return {"last_run": now, "assignments": due, "courses": titles, "grades": grades,
             "files": merge_known(old.get("files"), fresh_files, titles),
             "announcements": merge_known(announced, fresh_seen, titles),
-            "feedback": {**(old.get("feedback") or {}), **feedback}}
+            "feedback": {**(old.get("feedback") or {}), **feedback},
+            "comments": {**(old.get("comments") or {}), **(comments or {})}}

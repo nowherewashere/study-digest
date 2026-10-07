@@ -4,7 +4,7 @@ import unittest
 from study import cli, fmt, net
 from study.config import StudyError
 from study.moodle import (PAGE, accepts, accepts_line, check_state, check_submission,
-                          grade_of, submission_state)
+                          comment_rows, grade_of, submission_state)
 from tests.fakes import FakeNet, MoodleCase, config, fixture, tmpdir
 
 SERVER = "https://tuis.example/webservice/rest/server.php"
@@ -445,3 +445,12 @@ class SubmissionStateTest(unittest.TestCase):
         s = submission_state({}, {}, now)
         self.assertEqual((s["status"], s["canedit"], s["closed"], s["due"]),
                          ("new", None, False, None))
+
+
+class CommentRowsTest(unittest.TestCase):
+    def test_rows(self):
+        rows = comment_rows(fixture("comments_thread"), 100)
+        self.assertEqual([(c["id"], c["own"], c["text"]) for c in rows],
+                         [(801, False, "Добавьте схему сети."), (802, True, "Добавил, проверьте.")])
+        self.assertEqual(comment_rows(fixture("comments_empty"), 100), [])
+        self.assertEqual(comment_rows(None), [])

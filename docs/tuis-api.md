@@ -25,6 +25,7 @@ Moodle 4.5 на `https://esystem.rudn.ru` (адрес — `TUIS_URL` в `config.
 | `core_course_get_updates_since` | что изменилось в курсе с момента времени — основа отслеживания обновлений | `courseid`, `since` (unix) |
 | `mod_assign_get_assignments` | все задания всех курсов: `id`, `cmid`, `duedate`, `intro`, настройки сдачи | без параметров — по всем курсам |
 | `mod_assign_get_submission_status` | состояние моего ответа: статус, попытка, оценка, отзыв | `assignid` |
+| `core_comment_get_comments` | ветка комментариев под моим ответом (плагин `assignsubmission_comments`): преподаватель и студент | `contextlevel=module`, `instanceid=<cmid>`, `component=assignsubmission_comments`, `itemid=<id ответа>`, `area=submission_comments` |
 | `mod_quiz_get_quizzes_by_courses` | тесты курсов: `timeopen`, `timeclose`, `timelimit`, число попыток | `courseids[]` |
 | `mod_choice_get_choices_by_courses` | элементы «выбор темы доклада»: `id` и `coursemodule` для связи с cmid из состава курса | `courseids[]` |
 | `mod_choice_get_choice_options` | варианты выбора; у выбранного `checked: true` — так видно, выбрана ли тема | `choiceid` |
@@ -107,6 +108,20 @@ Moodle 4.5 на `https://esystem.rudn.ru` (адрес — `TUIS_URL` в `config.
   - `lastattempt.extensionduedate` (бывает `0`, `null` и ts) — индивидуальное продление: заменяет
     `duedate` и поднимает cutoff. В снимок пишется исходный `duedate`, иначе «срок сдвинут»
     каждый день.
+  - **Комментарии к ответу** — не часть `get_submission_status`: `lastattempt.submission.plugins`
+    несёт `{type: "comments", name}` без текста и без счётчика, поэтому по статусу не узнать,
+    есть ли ветка. Читается `core_comment_get_comments` (токену доступна, проверено 07.10.2026
+    на РУДН: у ответа без комментариев `{comments: [], count: 0, perpage: 15, canpost: true}`).
+    `itemid` — `lastattempt.submission.id` (при `id: 0` ответа нет, не запрашиваем);
+    `instanceid` — cmid. Запись: `comments[]` = `{id, content (HTML), format, timecreated,
+    fullname, userid, time (строка), delete, …}`, по возрастанию времени, отдаётся одна страница
+    (`perpage` 15, параметр `page`; при `count > perpage` старые 15, у нас читается только первая).
+    Свои комментарии отличаются `userid` из `site_info`. Живых комментариев на момент
+    проверки не нашлось — форма сверена с документацией Moodle, а не с ответом сервера. Отдельно
+    от отзыва преподавателя (`feedback.plugins[].editorfields`, плагин `assignfeedback_comments`).
+    Запрос идёт только за ответами с `submission.id`, ошибка — мягкая («комментарии к ответу N»).
+    Новые считаются по id против снимка `comments: {id задания: [id комментариев]}`; чужие, свои
+    в раздел «Комментарии к ответам» не попадают.
   - `teamsubmission=1` у задания → статус в `lastattempt.teamsubmission.status`, свой
     `submission` может остаться `new` (сдал одногруппник).
   - `lastattempt.submissionsenabled=false` / `nosubmissions=1` — плагинов ответа нет, сдаётся

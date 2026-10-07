@@ -49,6 +49,9 @@ class TaskTest(MoodleCase):
         (r / "labs" / "lab02" / "report" / "_output" / "nettech-lab02-report.pdf").write_bytes(b"%")
         self.net.reply("POST", ("mod_assign_get_submission_status", "assignid=12"),
                        fixture("submission_status_submitted"))
+        self.net.reply("POST", ("core_comment_get_comments", "itemid=5001"),
+                       fixture("comments_empty"))
+        self.net.reply("POST", "core_webservice_get_site_info", fixture("site_info"))
         d = task.build(self.cfg, self.m, self.course, "12")
         self.assertEqual((d["assign_id"], d["num"], d["flow"], d["grade"], d["grade_text"]),
                          (12, "02", "release", "9.50000", "9,50 / 10,00"))
@@ -60,6 +63,29 @@ class TaskTest(MoodleCase):
                       + fmt.moment(1789333140)["full"], text)
         self.assertIn("Локально (release): {} — отчёт pdf есть, презентация нет, видео 0/10, "
                       "заготовка ответа нет; вложения: ".format(r / "labs" / "lab02"), text)
+
+    def test_submission_comments(self):
+        self.net.reply("POST", "core_webservice_get_site_info", fixture("site_info"))
+        self.net.reply("POST", ("mod_assign_get_submission_status", "assignid=11"),
+                       fixture("submission_status_reopened"))
+        self.net.reply("POST", ("core_comment_get_comments", "itemid=5003"),
+                       fixture("comments_thread"))
+        d = task.build(self.cfg, self.m, self.course, "1")
+        self.assertEqual([(c["author"], c["time"]["ts"], c["text"]) for c in d["comments"]],
+                         [("Иван Петров", 1789500000, "Добавьте схему сети."),
+                          ("Студент Тестов", 1789503600, "Добавил, проверьте.")])
+        text = task.render(d)
+        self.assertIn("Комментарий · Иван Петров · " + fmt.moment(1789500000)["full"]
+                      + ": Добавьте схему сети.\n", text)
+
+    def test_submission_comments_soft_error(self):
+        self.net.reply("POST", ("mod_assign_get_submission_status", "assignid=11"),
+                       fixture("submission_status_reopened"))
+        self.net.reply("POST", ("core_comment_get_comments", "itemid=5003"),
+                       {"exception": "x", "errorcode": "nopermission", "message": "нет прав"})
+        d = task.build(self.cfg, self.m, self.course, "1")
+        self.assertEqual((d["comments"], [w["where"] for w in d["warnings"]]),
+                         ([], ["комментарии к ответу 11"]))
 
     def test_not_found(self):
         with self.assertRaises(StudyError) as e:

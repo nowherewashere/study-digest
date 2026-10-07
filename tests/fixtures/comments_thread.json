@@ -1,0 +1,16 @@
+{
+ "comments": [
+  {"id": 801, "content": "<p>Добавьте <b>схему</b> сети.</p>", "format": 1,
+   "timecreated": 1789500000, "strftimeformat": "%d %B %Y, %H:%M", "profileurl": "",
+   "fullname": "Иван Петров", "time": "15 сентября 2026, 10:00", "avatar": "", "userid": 200,
+   "delete": false},
+  {"id": 802, "content": "Добавил, проверьте.", "format": 1,
+   "timecreated": 1789503600, "strftimeformat": "%d %B %Y, %H:%M", "profileurl": "",
+   "fullname": "Студент Тестов", "time": "15 сентября 2026, 11:00", "avatar": "", "userid": 100,
+   "delete": true}
+ ],
+ "count": 2,
+ "perpage": 15,
+ "canpost": true,
+ "warnings": []
+}
