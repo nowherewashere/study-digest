@@ -1,9 +1,11 @@
+import argparse
 import base64
 import json
 import os
 import time
 import unittest
 
+from study import cli
 from study.config import StudyError
 from study.rutube import ACCESS_MARGIN, BASE, REFRESH_URL, UPLOAD_URL, Rutube, _extract_refresh
 from tests.fakes import FakeNet, config, tmpdir
@@ -165,6 +167,47 @@ class ApiTest(RutubeCase):
         self.net.reply("POST", "/playlist/custom/update/v1/", {})
         self.r.playlist_add("55", "v1")
         self.assertEqual(self.net.sent[-1]["json_body"], {"include": [55], "exclude": []})
+        self.net.reply("POST", "/playlist/custom/update/v1/", {})
+        self.r.playlist_remove("55", "v1")
+        self.assertEqual(self.net.sent[-1]["json_body"], {"include": [], "exclude": [55]})
+        self.net.reply("GET", "/playlist/custom/55/videos/",
+                       {"results": [{"id": "v1", "title": "ЛР 1", "is_hidden": False,
+                                     "created_ts": "2026-10-10T23:35:09"}]})
+        self.assertEqual(self.r.playlist_videos("55"),
+                         [{"id": "v1", "title": "ЛР 1", "created": "2026-10-10T23:35:09",
+                           "hidden": False, "url": "https://rutube.ru/video/v1/"}])
+
+    def test_video_card(self):
+        self.net.reply("GET", "/v2/video/v1/", {"id": "v1", "title": "ЛР 1", "duration": 614,
+                                                 "created_ts": "2026-10-10T23:35:09",
+                                                 "is_hidden": False, "author": {"id": 42}})
+        self.assertEqual(self.r.video_card("v1"),
+                         {"id": "v1", "title": "ЛР 1", "created": "2026-10-10T23:35:09",
+                          "duration": 614, "hidden": False, "author": 42,
+                          "url": "https://rutube.ru/video/v1/"})
+        self.assertIn("Authorization", self.net.sent[-1]["headers"])
+        for f in (self.refresh, self.access):
+            f.unlink()
+        self.net.reply("GET", "/v2/video/v2/", {"id": "v2"})
+        self.assertEqual(self.rt().video_card("v2")["url"], "https://rutube.ru/video/v2/")
+        self.assertNotIn("Authorization", self.net.sent[-1]["headers"])
+
+    def test_upload_keeps_id_when_playlist_fails(self):
+        f = self.tmp / "lab06.mkv"
+        f.write_bytes(b"MOVIE")
+        self.net.reply("POST", "/uploader/upload_session/", {"sid": "S1", "video": "v7"})
+        self.net.reply("PATCH", "/v2/video/v7/", {})
+        self.net.reply("POST", UPLOAD_URL + "S1", b"", headers={"Upload-Offset": "5"})
+        self.net.reply("POST", "/playlist/custom/update/v7/",
+                       StudyError("rutube", "HTTP 404: non-existent items"))
+        args = argparse.Namespace(file=str(f), url=None, title=None, desc=None, category=None,
+                                  age=None, hidden=False, playlist="55", slot="lab",
+                                  confirm=True, mode="auto")
+        v, text = cli.cmd_rt_upload(self.cfg, args)
+        self.assertEqual((v["id"], v["playlist_error"]), ("v7", "HTTP 404: non-existent items"))
+        self.assertIn("загружено: v7 https://rutube.ru/video/v7/", text)
+        self.assertIn("RUTUBE_LAB=https://rutube.ru/video/v7/", text)
+        self.assertIn("study rt playlist add 55 v7", text)
 
     def test_upload_url(self):
         self.net.reply("POST", BASE + "/video/", {"video_id": "v9"})

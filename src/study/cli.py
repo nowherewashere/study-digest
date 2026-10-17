@@ -280,6 +280,11 @@ def videos_table(rows):
                   for v in rows], ["id", "название", "", "ссылка"])
 
 
+def dated_videos_table(rows):
+    return table([[str(v["id"]), v["title"] or "", (v.get("created") or "")[:10], v["url"] or ""]
+                  for v in rows], ["id", "название", "создано", "ссылка"])
+
+
 def video_text(v, args):
     keys = [("id", "id"), ("title", "название"), ("is_hidden", "скрыто"),
             ("video_url", "ссылка"), ("duration", "длительность")]
@@ -331,11 +336,17 @@ def cmd_rt_upload(cfg, args):
     up = r.upload_url if args.url else r.upload_file
     v = up(args.url or args.file, title=title, description=read_text(args.desc),
            category=category, hidden=args.hidden, age=age)
-    if args.playlist:
-        r.playlist_add(args.playlist, v["id"])
-    text = "загружено: " + v["url"] + (" (скрыто)" if v["hidden"] else "")
+    text = f"загружено: {v['id']} {v['url']}" + (" (скрыто)" if v["hidden"] else "")
     if args.slot:
         text += f"\nRUTUBE_{args.slot.upper()}={v['url']}"
+    if args.playlist:
+        try:
+            r.playlist_add(args.playlist, v["id"])
+        except StudyError as e:
+            v = {**v, "playlist_error": e.message}
+            text += (f"\nв плейлист {args.playlist} не добавлено ({e.message}); видео ещё "
+                     f"обрабатывается — через несколько минут: "
+                     f"study rt playlist add {args.playlist} {v['id']}")
     return v, text
 
 
@@ -556,7 +567,7 @@ def rt_parsers(sub):
     s.add_argument("--hidden", action="store_true", help="сделать скрытым")
     s.add_argument("--visible", action="store_true", help="сделать публичным")
 
-    p = rs.add_parser("playlist", help="плейлисты: list/create/add")
+    p = rs.add_parser("playlist", help="плейлисты: list/create/add/remove/videos")
     ps = p.add_subparsers(dest="plcmd", required=True, metavar="действие")
     add(ps, "list", "свои плейлисты", pipe(
         rt, lambda r, _: r.playlists(), lambda o, _: videos_table(o) or "плейлистов нет"), MODE)
@@ -569,6 +580,15 @@ def rt_parsers(sub):
         lambda _, a: f"видео {a.video_id} → плейлист {a.playlist_id}"), MODE)
     s.add_argument("playlist_id")
     s.add_argument("video_id")
+    s = add(ps, "remove", "убрать видео из плейлиста", pipe(
+        rt, lambda r, a: r.playlist_remove(a.playlist_id, a.video_id),
+        lambda _, a: f"видео {a.video_id} убрано из плейлиста {a.playlist_id}"), MODE)
+    s.add_argument("playlist_id")
+    s.add_argument("video_id")
+    s = add(ps, "videos", "состав плейлиста", pipe(
+        rt, lambda r, a: r.playlist_videos(a.playlist_id),
+        lambda o, _: dated_videos_table(o) or "плейлист пуст"), MODE)
+    s.add_argument("playlist_id")
 
     s = add(rs, "upload", "загрузить видео: файл (tus) или --url", cmd_rt_upload, MODE)
     s.add_argument("file", nargs="?", help="локальный видеофайл (либо задать --url)")

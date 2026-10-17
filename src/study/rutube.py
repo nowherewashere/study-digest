@@ -156,6 +156,15 @@ class Rutube:
     def video(self, vid):
         return self._json(f"/v2/video/{vid}/")
 
+    def _signed_in(self):
+        return self._refresh_file.exists() or self._token_file.exists()
+
+    def video_card(self, vid):
+        v = self._json(f"/v2/video/{vid}/", auth=self._signed_in())
+        return {**_pick(v, id="id", title="title", created="created_ts", duration="duration",
+                        hidden="is_hidden"),
+                "author": (v.get("author") or {}).get("id"), "url": self.video_url(vid)}
+
     def edit(self, vid, **fields):
         age = fields.pop("age", None)
         body = {k: v for k, v in fields.items() if v is not None}
@@ -184,9 +193,20 @@ class Rutube:
         return {"id": pid, "title": out.get("title", title), "hidden": out.get("is_hidden", hidden),
                 "url": self.playlist_url(pid) if pid else None}
 
-    def playlist_add(self, pid, vid):
+    def _playlist_update(self, vid, include, exclude):
         return self._json(f"/playlist/custom/update/{vid}/", method="POST",
-                          json_body={"include": [int(pid)], "exclude": []})
+                          json_body={"include": include, "exclude": exclude})
+
+    def playlist_add(self, pid, vid):
+        return self._playlist_update(vid, [int(pid)], [])
+
+    def playlist_remove(self, pid, vid):
+        return self._playlist_update(vid, [], [int(pid)])
+
+    def playlist_videos(self, pid):
+        rows = self._json(f"/playlist/custom/{pid}/videos/").get("results", [])
+        return [{**_pick(v, id="id", title="title", created="created_ts", hidden="is_hidden"),
+                 "url": self.video_url(v.get("id"))} for v in rows]
 
     def progress(self, vid):
         return self._json(f"/uploader/{vid}/progress/")
