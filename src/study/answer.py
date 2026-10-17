@@ -1,7 +1,11 @@
 import pathlib
+import re
 
 from . import hosting, local
 from .config import ROOT, StudyError
+from .rutube import Rutube
+
+RUTUBE_VIDEO = re.compile(r"rutube\.ru/video/([0-9a-f]{32})")
 
 TEMPLATE = ("# Ссылки на скринкасты для ответа в ТУИС. "
             "Заполнить и запустить `study answer` ещё раз.\n")
@@ -51,7 +55,54 @@ def build(cfg, code, num, tag=None):
     return {"created": None, "path": str(out), "text": text, "tag": tag,
             "repo": str(repo), "lab": str(lab),
             "attachments": [str(p) for p in sorted(lab.glob("*/_output/*.pdf"))],
-            "missing": v["missing"]}
+            "missing": v["missing"],
+            "videos": check_videos(cfg, repo, num, tag, val)}
+
+
+def previous_release_date(repo, tag):
+    prev = local.git(repo, "describe", "--tags", "--abbrev=0", f"{tag}^") if tag else ""
+    return local.git(repo, "log", "-1", "--format=%cs", prev) if prev else ""
+
+
+def video_warnings(card, number, since):
+    out = []
+    if not number.search(card.get("title") or ""):
+        out.append("в названии нет номера работы")
+    if since and (card.get("created") or "")[:10] < since:
+        out.append(f"загружено раньше прошлого релиза ({since})")
+    return out
+
+
+def check_videos(cfg, repo, num, tag, values):
+    links = [(k, m.group(1)) for k, val in sorted(values.items())
+             if k.startswith("RUTUBE_") for m in [RUTUBE_VIDEO.search(val or "")] if m]
+    if not links:
+        return {"rows": [], "error": None}
+    number = re.compile(rf"(?i)(lab0*{int(num)}|№\s*{int(num)})(?!\d)")
+    since = previous_release_date(repo, tag)
+    r = Rutube(cfg)
+    rows = []
+    try:
+        for key, vid in links:
+            card = r.video_card(vid)
+            rows.append({**card, "key": key, "warnings": video_warnings(card, number, since)})
+    except StudyError as e:
+        return {"rows": rows, "error": e.message}
+    return {"rows": rows, "error": None}
+
+
+def video_lines(videos):
+    out = []
+    if videos["rows"]:
+        out.append("Видео в ответе (сверь с записью):")
+    for v in videos["rows"]:
+        d = v.get("duration") or 0
+        out.append(f"  {v['key']}: {v['title']} · {(v.get('created') or '?')[:10]} · "
+                   f"{d // 60}:{d % 60:02d}")
+        out += [f"    ! {w}" for w in v["warnings"]]
+    if videos["error"]:
+        out.append("Видео не проверены: " + videos["error"])
+    return out
 
 
 def render(d):
@@ -61,6 +112,7 @@ def render(d):
     out.append("Прикрепить к ответу:" if d["attachments"]
                else "PDF не собраны — сделай quarto render")
     out += ["  " + f for f in d["attachments"]]
+    out += video_lines(d.get("videos") or {"rows": [], "error": None})
     if d["missing"]:
         out.append("Не заполнено в {}: {}".format(
             pathlib.Path(d["path"]).with_suffix(".env").name, ", ".join(d["missing"])))

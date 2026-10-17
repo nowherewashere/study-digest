@@ -4,7 +4,8 @@ import unittest
 
 from study import answer, files, local
 from study.config import Course, StudyError
-from tests.fakes import DAY, NOW, MoodleCase, at_root, config, fixture, git, repo, tmpdir
+from tests.fakes import (DAY, NOW, FakeNet, MoodleCase, at_root, config, fixture, git, repo,
+                         tmpdir)
 
 SINCE = NOW - DAY
 
@@ -179,6 +180,39 @@ class AnswerTest(unittest.TestCase):
         text = answer.render(d)
         self.assertIn("Прикрепить к ответу:\n  " + d["attachments"][0], text)
         self.assertIn("Не заполнено в lab01.env: RUTUBE_REPORT, ", text)
+
+    def test_videos_checked(self):
+        net = FakeNet().install(self)
+        good, old = "a" * 32, "b" * 32
+        self.env.parent.mkdir(parents=True)
+        self.env.write_text(f"RUTUBE_LAB=https://rutube.ru/video/{good}/\n"
+                            f"RUTUBE_DEFENSE=https://rutube.ru/video/{old}/\n", encoding="utf-8")
+        net.reply("GET", f"/v2/video/{old}/", {"title": "infosec/lab06", "duration": 1540,
+                                               "created_ts": "2026-02-14T14:31:43"})
+        net.reply("GET", f"/v2/video/{good}/", {"title": "nettech/lab01", "duration": 614,
+                                                "created_ts": "2026-10-10T23:35:09"})
+        d = answer.build(self.cfg, "nettech", "1")
+        self.assertEqual([(v["key"], v["warnings"]) for v in d["videos"]["rows"]],
+                         [("RUTUBE_DEFENSE", ["в названии нет номера работы"]),
+                          ("RUTUBE_LAB", [])])
+        text = answer.render(d)
+        self.assertIn("  RUTUBE_LAB: nettech/lab01 · 2026-10-10 · 10:14", text)
+        self.assertIn("  RUTUBE_DEFENSE: infosec/lab06 · 2026-02-14 · 25:40\n"
+                      "    ! в названии нет номера работы", text)
+        net.reply("GET", f"/v2/video/{old}/", StudyError("rutube", "HTTP 404"))
+        d = answer.build(self.cfg, "nettech", "1")
+        self.assertIn("Видео не проверены: HTTP 404", answer.render(d))
+
+    def test_video_warnings(self):
+        number = answer.re.compile(r"(?i)(lab0*6|№\s*6)(?!\d)")
+        card = {"title": "net-os-admin/lab06", "created": "2026-10-10T23:35:09"}
+        self.assertEqual(answer.video_warnings(card, number, "2026-10-03"), [])
+        self.assertEqual(answer.video_warnings({**card, "title": "Лабораторная работа № 6"},
+                                               number, ""), [])
+        self.assertEqual(answer.video_warnings({"title": "lab16", "created": "2026-02-14"},
+                                               number, "2026-10-03"),
+                         ["в названии нет номера работы",
+                          "загружено раньше прошлого релиза (2026-10-03)"])
 
     def test_tag_and_remote_only(self):
         self.env.parent.mkdir(parents=True)
