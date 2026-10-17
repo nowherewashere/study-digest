@@ -335,7 +335,8 @@ study sc releases | release <тег> --title T --notes F | update <тег> --not
 ```
 study rt jwt [--refresh T] | login [--email E] | me | api <путь>
 study rt categories | video <id> | edit <id> [--title T] [--desc F] [--category N] [--age A] [--hidden | --visible]
-study rt playlist list | create --title T [--hidden] | add <id-плейлиста> <id-видео>
+study rt playlist list | create --title T [--hidden] | videos <id-плейлиста>
+study rt playlist add | remove <id-плейлиста> <id-видео>
 study rt upload <файл> | --url U [--title T] [--category N] [--age A] [--hidden] [--playlist ID] [--slot lab|report|presentation|defense] --confirm
 ```
 
@@ -442,7 +443,8 @@ PR (падение `--since all` на Windows) вошёл в v1.4.0 вместе
 репозитории — из git-remote, тег — последний или `--tag`, PDF отчёта и презентации — из `_output/`.
 Ссылок на скринкасты в API нет, они хранятся в `<код>/tuis/labNN.env` (четыре записи
 на двух площадках плюс два плейлиста); первый запуск создаёт файл пустым, второй пишет
-`<код>/tuis/labNN.md`. Затем
+`<код>/tuis/labNN.md` и печатает каждое видео Rutube из ответа — название, дату, длительность —
+с предупреждением, если в названии нет номера работы или видео старше прошлого релиза. Затем
 `study submit <id> --text <код>/tuis/labNN.md --attach <отчёт.pdf> <презентация.pdf>`:
 план сверяет текст и файлы с настройками задания, с `--confirm` загружает файлы
 и отправляет (старый путь `study upload` → `--files <itemid>` остаётся). Оба файла
