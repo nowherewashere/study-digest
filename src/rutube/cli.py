@@ -45,6 +45,12 @@ def edit_video(r, args):
     return r.edit(args.video_id, **fields)
 
 
+def need_slot(args):
+    if args.env and not args.slot:
+        raise ToolError("rutube", "--env пишет ссылку в строку RUTUBE_<SLOT>: нужен --slot",
+                        code="usage")
+
+
 def record(args, url):
     if not args.slot:
         return ""
@@ -56,6 +62,7 @@ def record(args, url):
 
 
 def cmd_playlist_create(cfg, args):
+    need_slot(args)
     p = rt(cfg, args).playlist_create(args.title, args.hidden)
     text = f"плейлист создан: {p['id']} {p['url'] or ''}".rstrip()
     return p, text + (record(args, p["url"]) if p["url"] else "")
@@ -64,9 +71,7 @@ def cmd_playlist_create(cfg, args):
 def cmd_upload(cfg, args):
     if bool(args.file) == bool(args.url):
         raise ToolError("rutube", "укажи либо файл, либо --url (одно из двух)", code="usage")
-    if args.env and not args.slot:
-        raise ToolError("rutube", "--env пишет ссылку в строку RUTUBE_<SLOT>: нужен --slot",
-                        code="usage")
+    need_slot(args)
     title = args.title or (pathlib.Path(args.file).stem if args.file else None)
     category = args.category or DEFAULT_CATEGORY
     age = 0 if args.age is None else args.age

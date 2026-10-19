@@ -1,196 +1,81 @@
-# Учебная директория и инструмент `study`
+# Study directory and the `study` tools
 
-> Для кого: ИИ-агент, работающий в этой папке. Когда читать: перед любой работой здесь.
-> Ставится в файл оператора (`CLAUDE.md`, `AGENTS.md`, …) командой `study agent`.
+> Audience: an AI agent working in this folder; read before any work here.
+> `study agent <operator>` installs this text into the operator file (`CLAUDE.md`, `AGENTS.md`, …)
+> and the skills from `.digest/skills/` into `.claude/skills/` or `.agents/skills/`.
 
-## Что здесь лежит
+Talk to the user and write `NOTES.md` in Russian. Tool output is Russian as well.
 
-- `.digest/` — инструмент `study` (Python, только stdlib), его настройки и документация.
-  Команда `study` лежит в `~/.local/bin` (ставит `study setup`; Linux, macOS, Windows):
-  из любого каталога — просто `study`. Если её нет в PATH — `python3 .digest/study …`
-  от корня учебной директории (Windows: `py .digest/study …`).
-- `<код предмета>/` — папка на каждый отслеживаемый курс (строки `CODE` в `.digest/config.env`).
-  У курса есть **профиль сдачи** — строка `FLOW <id> release|file` там же (без строки —
-  `release`, если в папке курса есть репозиторий, иначе `file`; `study courses` показывает,
-  `study courses --setup` записывает):
-  - `release` — репозиторий курса из шаблона преподавателя, git-flow, релиз с отчётом
-    и презентацией на обоих хостингах, скринкасты, `study answer`, `tuis/`;
-  - `file` — отчёт файлом: работа в `<код>/labNN/`, сдача `study submit <id> --attach`.
+## Layout
 
-  Внутри папки:
-  - `NOTES.md` — находки и наработки по предмету. Читать перед работой над предметом,
-    дописывать после каждой работы или находки. Заготовку кладут `study setup` и
-    `study courses --setup` (шапка с профилем, «Задания и сроки», «Ключевые находки», «Лабы»);
-    при первом обращении к предмету заполнить шапку — курс в ТУИС, преподаватель, формат
-    сдачи — по программе и БРС из `stash/`, таблицу заданий — по `study assigns --course <код>`.
-    Нет файла и нет `stash/` — `study files <код> --pull` и завести по той же схеме.
-  - `stash/` — материалы курса из ТУИС: методички, слайды, программы. Скачивает
-    `study files <код> --pull`; сводка только называет новые файлы.
-  - репозиторий курса (каталог с `.git`, профиль `release`) — только сама работа: его
-    смотрит преподаватель. Лабы — `labs/labNN/`.
-  - `tuis/` (профиль `release`) — служебное для сдачи: `labNN.env` (ссылки на скринкасты,
-    заполняет человек) и `labNN.md` (заготовка ответа); появляется при первом `study answer`.
-    В репозиторий курса не попадает.
-  - `labNN/` (профиль `file`) — работа и отчёт (`report/_output/*.pdf`), никакого репозитория
-    инструмент здесь не ждёт.
+- `.digest/` — the tools (Python, stdlib only) and their settings: `study` (TUIS = Moodle),
+  `gitverse`, `sourcecraft`, `rutube`, `labrelease`. `study setup` puts all five into
+  `~/.local/bin`; otherwise run `python3 .digest/<command>` from the study root (Windows: `py`).
+  Settings and tokens: `.digest/config.env`, outside git.
+- `<course>/` — one folder per tracked course (`CODE <id> <folder>` in `config.env`):
+  - `NOTES.md` — what is known about the course: teacher, submission format, deadlines, findings.
+  - `stash/` — course materials from TUIS (`study files <course> --pull`).
+  - `screencast` courses: the course repository (only the work itself, the teacher reviews it)
+    and `tuis/` next to it (screencast links, answer draft).
+  - `direct` courses: `labNN/` with the work and the files to hand in.
 
-## Инструмент `study`
+## Submission profiles
 
-Всё внешнее — ТУИС (Moodle), GitVerse, SourceCraft, Rutube — через одну программу.
-`--help` у любой команды; `--json` до или после имени команды — те же данные машиночитаемо,
-ровно то, что видит текстовый вывод.
+Every course has `FLOW <id> screencast|direct` in `config.env` (`study courses` shows it,
+`study courses --setup` writes it). `study task <course> <NN>` prints the profile and its skill.
 
-| Команда | Что делает |
-|---------|------------|
-| `study state [--local] [--no-save] [--pull] [--since X]` | готовая сводка markdown: сроки с состоянием в ТУИС, баллы, уведомления, новое в курсах, состояние репозиториев; `--local` — без ТУИС, `--pull` — скачать новые файлы в `stash/` |
-| `study digest [--no-save] [--since X]` | та же сводка, но только по ТУИС |
-| `study files [<код>] [--pull\|--all\|--force]` | файлы курса: новые с прошлого запуска (в пустую `stash/` — все), `--pull` скачивает документы до 50 МБ, перезалитые в ТУИС перекачивает поверх («обновлён»); `--force` — всё заново; ссылки курса (Телемост и т. п.) показываются строкой «ссылка … → URL»; без кода — все курсы |
-| `study task <код> <NN\|id\|cmid>` | карточка задания: текст целиком, срок, что принимает, состояние ответа, балл, отзыв и комментарии к ответу, что есть на диске, файлы `stash/` с этим номером; `NN` — работа по номеру (лаба, задача ИДЗ), иначе id из `study assigns` или cmid из сводки. У задания, закрытого ограничением доступа, показывает срок, описание и причину («нужна группа …»). Ничего не сохраняет |
-| `study answer <код> <NN> [--tag]` | только `release`: заготовка ответа — первый запуск создаёт `tuis/labNN.env`, после заполнения пишет `tuis/labNN.md` и сверяет видео Rutube из ответа (название, дата, длительность, предупреждения) |
-| `study submit <id> [--text F] [--attach <файл>…] [--files <itemid>] --confirm` | отправка ответа; без `--confirm` — план и код возврата 1. План сверяет с настройками задания (текст включён? сколько файлов, какие типы и размер) и отказывает при несовпадении даже с `--confirm`; `--attach` сам загружает файлы при отправке (`study upload` + `--files <itemid>` — старый путь, состав по itemid не проверяется) |
-| `study me / courses [--setup] / functions / call <fn> k=v` | токен, курсы (список / настройка игнора и папок), ручки Moodle, произвольный вызов |
-| `study assigns [--course <код>] / calendar / grades / status <id>` | задания, дедлайны, баллы, состояние ответа; с `--course` в список попадают и задания, закрытые ограничением доступа (строка с cmid и причиной, без id), без курса — только счётчик: состав пришлось бы спрашивать по каждому курсу; в `--json assigns` у задания есть `intro` (текст из ТУИС), `source`, `available` и `reason` |
-| `study gv releases \| release <тег> --title T --notes F \| update <тег> … \| asset <id-релиза> <файл> \| api <путь>` | GitVerse; запускать из каталога репозитория курса — репо берётся из remote `origin` |
-| `study sc releases \| release … \| update … \| asset <тег> <файл> \| api <путь>` | SourceCraft, remote `src`; ссылки на gitverse в заметках релиза подменяются |
-| `study rt jwt \| login \| me \| video \| edit \| playlist list\|create\|add\|remove\|videos \| upload … --confirm` | Rutube: вход, свои видео, плейлисты (состав, добавить, убрать), загрузка |
-| `study agent [оператор…]` | этот текст — в файл оператора в корне учебной директории |
-| `study update [--check\|--yes]` | обновить сам инструмент из репозитория (git pull) и блоки агента; `--check` — план: коммиты, diff --stat, подпись; без терминала обновляет только `--yes` |
-| `study setup` | первоначальная настройка заново: токены, каталоги, команда в PATH, оператор, курсы; спрашивает в терминале |
+- `screencast` — the lab is done on camera: course repo from the teacher's template, git-flow,
+  release with files on GitVerse and SourceCraft, Rutube videos, answer with links.
+- `direct` — the answer goes straight into TUIS: text and/or files, whatever the assignment takes.
 
-**Где что лежит.** Настройки и секреты — `.digest/config.env` (вне git; на POSIX права 600):
-`TUIS_TOKEN`, `GITVERSE_TOKEN`, `SOURCECRAFT_TOKEN`, `COURSE_IGNORE`, строки `CODE <id> <папка>`
-и `FLOW <id> release|file`.
-Токены Rutube инструмент ведёт сам в `.digest/.secrets/`. Снимок состояния между сводками —
-`.digest/.state.json` (время прошлого запуска, сроки, баллы, состав курсов), копии по дням —
-`.digest/state/ГГГГ-ММ-ДД.json`. Его двигают `study state` и `study digest`, поэтому
-**при любых проверках запускать их с `--no-save`**, иначе утренняя сводка потеряет «новое
-с прошлого запуска». Пересчитать от другой точки — `--since ГГГГ-ММ-ДД | N | never | all`.
+## Skills
 
-## Правила
+| Skill | Use when |
+|-------|----------|
+| `study-digest` | the scheduled morning digest, or the user asks for the study summary |
+| `study-task` | "what about lab N", preparing an assignment, reading a new handout |
+| `study-lab` | doing and handing in a `direct` work (default report: Word, GOST 7.32) |
+| `lab-release-with-screencasts` | a `screencast` lab: report, release, videos, answer |
+| `study-course` | a new course, or the digest line «Без папки (файлы не скачиваются)» |
+| `study-update` | the digest ends with «Обновление study: …» or «Блок агента … устарел» |
 
-- **Ничего не отправлять без явного согласия человека.** `study submit` необратим
-  (у заданий `submissiondrafts=0`): сначала показать план (команда без `--confirm`),
-  дождаться подтверждения, только потом `--confirm`. То же для `study rt upload`.
-- Токены не печатать, в заметки и файлы не копировать.
-- Проверки и отладка сводки — только с `--no-save`.
-- В репозиторий курса — только работа. Служебные файлы (`tuis/`, заготовки, ссылки)
-  лежат рядом с предметом; в `.gitignore` курса про них не писать.
-- **Разобрать задание** (вопрос «что по лабе N», подготовка окружения): `study task <код> N`
-  — текст задания, срок, что принимает, что уже есть на диске и какие методички в `stash/`
-  похожи по номеру; методичку прочитать из `stash/` (нет — `study files <код> --pull`);
-  итог — строка в `NOTES.md`: срок, вариант, требования к отчёту.
-- Работу, которая сдаётся со скринкастом, выполняет человек под запись; агент готовит
-  окружение, отчёты, презентации и выгрузку. Вперёд не забегать.
-- После каждой работы или находки дописать `NOTES.md` предмета. Когда сводка назвала новые
-  файлы, а человек ставит задачу по этому предмету — сначала прочитать новую методичку из
-  `stash/` и дописать `NOTES.md` (сроки, вариант, требования к отчёту); ежедневная сводка
-  сама этого не делает.
-- **Курс без папки.** Строка сводки «Без папки (файлы не скачиваются): … (id N)» — курс
-  отслеживается по срокам, но `stash/` и `NOTES.md` у него нет, файлы ТУИС качать некуда,
-  `study files`/`task` по нему откажут. Предложи человеку завести предмет: строка
-  `CODE <id> <папка>` и `FLOW <id> release|file` в `.digest/config.env` (или `study courses
-  --setup`), папка с `stash/` и `NOTES.md` по общей схеме, память `subj-<код>`; если предмет
-  вести не нужно — курс в `COURSE_IGNORE`. Строка держится в каждой сводке, пока состояние
-  не разрешено, — молча её не пропускать.
-- **Обновления инструмента.** Если сводка заканчивается строкой «Обновление study: …» или
-  «Блок агента … устарел», покажи человеку план `study update --check` (коммиты, diff --stat,
-  проверена ли подпись) и по его согласию выполни `study update --yes` (или `study agent <код>`):
-  обновление меняет код, который работает с токенами, поэтому само по себе оно не запускается,
-  а без терминала без `--yes` только печатает план. После обновления инструкция в этом файле
-  уже новая — перечитай её.
+## Commands
 
-## Работа над самим инструментом
+Every command has `--help`; `--json` before or after the command name gives the same data.
 
-Код `.digest/` правится здесь же, поэтому правила для агента, который его меняет:
+| Command | What it does |
+|---------|--------------|
+| `study state [--pull] [--no-save] [--since X]` | the digest as markdown: deadlines with TUIS state, grades, notifications, new course files, «Горит»; `--pull` downloads new files into `stash/` |
+| `study task <course> <NN\|id\|cmid>` | one assignment: full text, deadline, what it accepts, answer state, grade, feedback, profile and skill, files on disk, matching `stash/` files |
+| `study assigns [--course <c>]` · `grades` · `calendar` · `status <id>` | assignments, grades, deadlines, answer state |
+| `study files [<course>] [--pull\|--all\|--force]` | course files: new since last run, download |
+| `study submit <id> [--text F] [--attach F…] --confirm` | send an answer; without `--confirm` prints the plan and checks it against the assignment settings |
+| `study courses [--setup]` · `me` · `functions` · `call <fn> k=v` | courses and folders, token owner, raw Moodle calls |
+| `study agent [operator…]` · `update [--check\|--yes]` · `setup` | install instructions and skills, update the tools, first-time setup |
+| `gitverse` / `sourcecraft` `releases\|release\|update\|asset\|api` | releases; run inside the course repo |
+| `rutube me\|video\|edit\|playlist …\|upload … --confirm` | own videos, playlists, upload |
+| `labrelease publish NN [--confirm]` · `labrelease answer NN` | release a screencast lab on both hostings, compose the TUIS answer; run inside the course repo |
 
-- только stdlib; Python 3.8 (CI гоняет 3.8 и 3.12): без `match`, `X | Y` в аннотациях,
-  `str.removeprefix`, `dict | dict`, `zip(strict=)`;
-- `ruff check src tests study install.py` (правила в `pyproject.toml`, строка ≤ 100);
-  у каждого `open`/`read_text`/`write_text` — `encoding=` (`tests/test_style.py`);
-- комментариев и докстрингов в коде нет (исключения — шебанг и `# noqa: КОД`); пояснения —
-  в именах, коммитах и `docs/`; проверяет `tests/test_style.py`;
-- тесты без сети: `python3 -m unittest` из `.digest` (или `PYTHONPATH=src python3 -m unittest
-  discover -s tests -t .`); внешние ответы — `tests/fakes.py: FakeNet` и фикстуры
-  `tests/fixtures/*.json` по форме из `docs/tuis-api.md`; тесты не должны писать в настоящие
-  `<код>/stash/` — подменять `ROOT` (`patch(self, files, "ROOT", tmp)`);
-- после правки `docs/AGENTS.md` — `study agent <код>`, блок в файле оператора обновится;
-- коммиты conventional (`feat(digest): …`), подпись GPG, `git push origin` — по согласию;
-- нашли ошибку в чужой установке — issue или PR в репозиторий инструмента на GitHub,
-  локальные правки не делать: `study update` — это `git pull --ff-only`, локальный коммит
-  его остановит, а правка без коммита пропадёт.
+## Rules
 
-## Ежедневная сводка
+- Nothing leaves the machine without the user's explicit "yes": `study submit`, `rutube upload`
+  and `labrelease publish` are public or irreversible. Run them without `--confirm`, show the
+  plan, wait, then repeat with `--confirm`.
+- Never print tokens or copy them into notes or files. On `invalidtoken` the user issues a new
+  Moodle token and runs `study setup` themselves.
+- To look at the digest while debugging, use `study state --no-save`: a plain run moves the
+  snapshot and the morning digest loses "new since last run".
+- The course repository holds only the work. Service files (`tuis/`, drafts, links) live beside
+  it and are not mentioned in the course `.gitignore`.
+- Work recorded on screencast is performed by the user. Prepare the environment, reports,
+  slides and uploads; do not run ahead.
+- Before working on a course read its `NOTES.md`; after each work or finding, append to it.
+- A refusal from `study submit` (closed, locked, restricted, wrong files) is final: report it,
+  do not work around it.
+- A bug in the tools: an issue or PR at github.com/nowherewashere/study-digest. Do not edit
+  `.digest/` locally — `study update` is `git pull --ff-only` and stops on local commits.
 
-Основной режим: задача оператора раз в день запускает `study state --pull` и печатает
-вывод как есть — сводка уже свёрстана программой, включая раздел «Горит» (несданное,
-что просрочено или сдаётся на неделе). Агент ничего не дописывает, файлов не читает,
-работу не начинает. Промпт задачи — `.digest/docs/daily-digest-prompt.md`.
+## References
 
-## Сдача работы
-
-Зависит от профиля курса (`study courses`, строка `FLOW` в `config.env`).
-
-**`release`.** Чек-лист — `.digest/docs/lab-submission.md`, читать перед началом каждой работы.
-Порядок: выполнение под запись → отчёт и презентация → архив исходников → **релиз последним**
-(тег через git-flow, файлы релиза на оба хостинга `study gv asset` / `study sc asset`
-из каталога репозитория) → скринкасты → `study answer` → `study submit <id> --text
-<код>/tuis/labNN.md --attach <отчёт.pdf> <презентация.pdf>` (план, затем `--confirm`
-с согласия человека).
-
-**`file`.** Работа в `<код>/labNN/`, отчёт по шаблону отчёта из чек-листа (Quarto → PDF
-в `report/_output/`), без релизов и скринкастов. Сдача — `study submit <id> --attach
-<отчёт.pdf>` без `--text` (план покажет, сколько файлов и каких типов принимает задание),
-затем `--confirm` с согласия человека. `study answer` здесь не нужен и откажет.
-
-## Грабли
-
-- **Ссылка на видео — только из вывода `study rt upload`.** Upload печатает
-  `загружено: <id> <ссылка>` и строку `RUTUBE_<SLOT>=` до шага с плейлистом; если плейлист
-  не принял видео (оно ещё обрабатывается, 404 «non-existent items»), команда всё равно
-  успешна и подсказывает `study rt playlist add` на потом. Видео не искать по подстроке
-  названия в списке канала: новое появляется там через несколько минут, а под «lab06»
-  подходит и чужая прошлогодняя лаба (так в ответ ЛР 6 net-os-admin ушло `infosec/lab06`).
-  Перед `study submit` прочитать блок «Видео в ответе» из `study answer`: название, дата,
-  длительность должны совпадать с записью, строки `!` — разобрать. Лишнее видео из
-  плейлиста убирает `study rt playlist remove`, состав — `study rt playlist videos`.
-- `mod_assign_get_assignments` не отдаёт задания с ограничением доступа — их сроки сводка
-  берёт из состава курса, статус у них «доступ закрыт». Слияние обеих ручек делает реестр
-  (`study/assigns.py`), им же пользуются `study task`, `study assigns` и `study submit`:
-  у задания из состава курса есть только cmid, поэтому отправить по нему ответ нельзя —
-  `study submit` откажет, пока преподаватель не откроет задание.
-- Ошибки Moodle приходят с HTTP 200 в теле; календарь листается по 50 курсором `aftereventid`.
-- В `state --json`: `labs[].tuis.matched_by: "number"` — пара «лаба ↔ задание» найдена по
-  номеру в названии; `report.source` всегда `true` из-за заготовок шаблона курса.
-- GitVerse: заголовок `Accept` обязателен, `target_commitish` только полный SHA, `.qmd`
-  и `.html` во вложения не берёт — всё это уже учтено в `study gv`, curl руками не собирать.
-- Строка «Не удалось: …» в конце сводки — разделы, которые не собрались и после повторов
-  (чтение Moodle повторяется до трёх раз при обрыве и 502–504; `fetch` GitHub для проверки
-  обновления — 20 с и вторая попытка); в `--json` это `errors`. «git · обновление study ·
-  fetch не удался» — GitHub не ответил, сама сводка при этом полная.
-  Битый `.state.json` не роняет сводку: берётся последний дневной снимок из `state/`.
-- `nopermissiontoviewgrades` у `gradereport_user_get_grade_items` — в курсе выключен показ
-  оценок студентам; сводка такой курс в «Баллах» молча пропускает, это не сбой.
-- Новизна файла — не по дате: файл, скопированный из прошлогоднего курса, приходит с
-  `timemodified` того года. Новое — чего не было в составе курса из снимка; снимок без
-  состава (до обновления) сравнивает только по дате, состав появится после первой сводки.
-- `invalidtoken` — токен ТУИС перевыпущен или отозван; после ошибки печатается подсказка
-  (профиль Moodle → «Ключи безопасности» → Moodle mobile web service), новый токен —
-  `study setup`. Человек делает это сам: токен агенту не показывают.
-- Время в сводке — пояс машины; сроки в ТУИС московские. В WSL/Windows пояс обычно один
-  и тот же, на сервере в другом поясе «23:59» съедет.
-- Пересдачи («Пересдача лабораторной работы № N») — не сроки, пока оригинал не просрочен
-  и не сдан: в «Сроки»/«Горит» их нет, в `--json` — `retakes[]` с `retake_of`/`needed`.
-- Ответ, возвращённый на доработку (`reopened`), в сводке — «на доработку» и в «Горит»,
-  отзыв преподавателя — в разделе «Отзывы» и в `study task`.
-- «Приём закрыт» в «Сроках» — срок прошёл и ТУИС ответ уже не примет (`canedit=false`;
-  у РУДН cutoff = срок): в «Горит» такой работы нет, сдавать её — через задание «Пересдача …»,
-  которое в «Горит» остаётся. «Очно / без ответа в ТУИС» — задание без плагинов ответа.
-  В `--json` у задания: `closed`, `opens`, `canedit`, `graded`, `locked`. `study submit`
-  всё это проверяет до отправки, а отказ Moodle (HTTP 200 + warnings) — ошибка, не «Отправлено».
-- «Объявления» — новые записи форумов `type: news` (по id против снимка); форум, который
-  не прочитался, оставляет прежний список, ошибка — в «Не удалось».
-
-## Справочники
-
-`.digest/README.md` — установка и команды; `.digest/docs/tuis-api.md` — ручки Moodle
-и их особенности; `.digest/docs/hosting-api.md` — API GitVerse и SourceCraft.
+`.digest/README.md` — install and commands; `.digest/docs/tuis-api.md` — Moodle calls;
+`.digest/docs/hosting-api.md` — GitVerse and SourceCraft API.

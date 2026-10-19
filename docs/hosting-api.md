@@ -1,6 +1,6 @@
 # GitVerse и SourceCraft: справочник API
 
-> Для кого: тот, кто правит `src/study/hosting.py` или зовёт `study gv api` / `study sc api`.
+> Для кого: тот, кто правит `src/hosting/client.py` или зовёт `gitverse api` / `sourcecraft api`.
 > Когда читать: при добавлении хостинга и при непонятном 4xx.
 
 Два хостинга кода, на которых лежит репозиторий курса: GitVerse — основной (remote `origin`),
@@ -39,8 +39,8 @@ GitVerse, `src` для SourceCraft; remote на другой хостинг не
 3. **`target_commitish` — только полный SHA коммита.** Имя ветки не принимается: 422.
    Значение берётся как `git rev-parse <тег>^{commit}`.
 4. **Вложения**: имя файла передаётся query-параметром `?name=`, сам файл — в multipart-поле
-   **`attachment`**. Расширения `.qmd` и `.html` отклоняются с `VALIDATION_ERROR`: `.qmd`
-   копировать под именем `.md`, html класть в zip.
+   **`attachment`**. Расширения `.qmd` и `.html` отклоняются с `VALIDATION_ERROR`: клиент
+   сам грузит `.qmd` под именем `.md`, а `.html` — в zip `<имя>-html.zip`.
 5. Официального CLI нет. Документация `docs/public-api` временами отдаёт 404; OpenAPI-спека
    лежит в самом GitVerse: репозиторий `gitverse/rest-api-description`, файл `v1/openapi-1.9.json`
    (raw-ссылки не работают, тянуть через `GET /repos/gitverse/rest-api-description/contents/…`
@@ -89,14 +89,14 @@ Swagger открыт: `https://api.sourcecraft.tech/sourcecraft.swagger.json`.
 - Оба различают репозиторий по паре `владелец/имя`.
 - Формы ответов и имена полей у них **разные**, поэтому в коде они за одним интерфейсом
   (`releases`, `release`, `asset`, `web_url`), а различия спрятаны внутри классов.
-- Порядок выпуска релиза — `lab-submission.md`: сначала отчёт и презентация, потом тег
-  через git-flow, и только потом релиз с файлами.
+- Порядок выпуска релиза — скилл `lab-release-with-screencasts`: сначала отчёт и
+  презентация, потом тег через git-flow, и только потом `labrelease publish` — релиз с файлами.
 
 ## Описания релизов и ссылки
 
 Оба хостинга принимают Markdown. Правка выпущенного релиза: GitVerse — `PATCH /repos/{o}/{r}/releases/{id}`
 (`name`, `body`), SourceCraft — `PATCH /repos/{org}/{repo}/releases/tag/{tag}` (`title`, `release_notes`).
-В CLI это `study gv update <тег> --notes F --title T` и `study sc update …`. SourceCraft-клиент подменяет
+В CLI это `gitverse update <тег> --notes F --title T` и `sourcecraft update …`. SourceCraft-клиент подменяет
 в заметках `https://gitverse.ru/<gv-repo>` на `https://sourcecraft.dev/<sc-repo>` (метод `localize`):
 адрес коммита `/commit/<sha>` на обоих хостингах одинаков, а `compare` GitVerse не поддерживает —
-см. `lab-submission.md`, раздел «Ссылки в CHANGELOG».
+см. скилл `lab-release-with-screencasts`, раздел «CHANGELOG and links».

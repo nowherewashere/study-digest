@@ -10,6 +10,8 @@ def cmd_publish(cfg, args):
     text = publish.render(p)
     if p["problems"]:
         return publish.public(p), text, 1
+    if not any(h["create"] or h["upload"] for h in p["hosts"]):
+        return publish.public(p), text + "\nНечего делать: релизы и файлы на месте."
     gate = confirm_gate(publish.public(p), [text], args,
                         "Релиз публикуется на обоих хостингах. Повтори с --confirm.")
     if gate:

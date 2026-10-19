@@ -23,7 +23,7 @@ jobs:
       - name: Тесты
         run: python -m unittest -v
       - name: Синтаксис
-        run: python -m compileall -q src study gitverse sourcecraft rutube labrelease install.py
+        run: python -m compileall -q src skills study gitverse sourcecraft rutube labrelease install.py
       - name: Лаунчеры
         run: |
           python study --version
@@ -33,7 +33,7 @@ jobs:
           python labrelease --help
       - name: ruff
         if: matrix.os == 'ubuntu-latest' && matrix.python == '3.12'
-        run: pipx run ruff check src tests study gitverse sourcecraft rutube labrelease install.py
+        run: pipx run ruff check src skills tests study gitverse sourcecraft rutube labrelease install.py
       - name: shellcheck
         if: matrix.os == 'ubuntu-latest' && matrix.python == '3.12'
         run: shellcheck -S warning setup.sh

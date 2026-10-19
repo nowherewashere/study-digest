@@ -230,6 +230,15 @@ class PublishTest(CourseCase):
                        {})
         self.net.reply("POST", GV + "/releases/9/assets?name=nettech-lab01-sources.zip", {})
         publish.apply(self.course, p)
+        all_names = publish.files(self.course, "01")[0]
+        self.releases([{"id": 9, "tag_name": "v1.1.0", "name": "v1.1.0",
+                        "assets": [{"name": n} for n in all_names]}],
+                      [{"tag": "v1.1.0", "assets": [{"name": n, "attachment": {}}
+                                                    for n in all_names]}])
+        _, text, *rc = cli.cmd_publish(self.cfg, argparse.Namespace(num="1", tag=None,
+                                                                    confirm=False))
+        self.assertEqual(rc, [])
+        self.assertTrue(text.endswith("Нечего делать: релизы и файлы на месте."))
 
     def test_problems_block_release(self):
         (self.lab / "presentation/_output/nettech-lab01-presentation.pdf").unlink()

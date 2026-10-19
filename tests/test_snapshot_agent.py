@@ -70,6 +70,17 @@ class AgentTest(unittest.TestCase):
         self.src.write_text("# Инструкция\n\nтекст v1\n", encoding="utf-8")
         at_root(self, self.root, agent)
         patch(self, agent, "SOURCE", self.src)
+        self.skills = self.root / "skills.src"
+        patch(self, agent, "SKILLS", self.skills)
+
+    def skill(self, base, name, body="", owner=True):
+        d = base / name
+        (d / "references").mkdir(parents=True, exist_ok=True)
+        meta = "metadata:\n  source: study-digest\n" if owner else ""
+        (d / "SKILL.md").write_text(f"---\nname: {name}\ndescription: d\n{meta}---\n{body}",
+                                    encoding="utf-8")
+        (d / "references" / "x.md").write_text(body, encoding="utf-8")
+        return d
 
     def test_new_append_stale_idempotent(self):
         r = agent.install("copilot")
@@ -93,6 +104,34 @@ class AgentTest(unittest.TestCase):
         self.assertTrue(text.endswith("\n# После\n"))
         agent.install("claude")
         self.assertEqual((self.root / "CLAUDE.md").read_text(encoding="utf-8"), text)
+
+
+    def test_skills_synced_and_foreign_kept(self):
+        self.skill(self.skills, "study-task", "v1")
+        self.skill(self.skills, "study-lab", "v1")
+        claude = self.root / ".claude" / "skills"
+        self.skill(claude, "teach", "моё", owner=False)
+        self.skill(claude, "study-old", "старое")
+        st = agent.status("claude")
+        self.assertEqual((st["skills"], st["skills_stale"], st["current"]),
+                         (".claude/skills", ["study-lab", "study-task", "study-old"], False))
+        self.assertTrue(agent.install("claude")["current"])
+        self.assertEqual(sorted(p.name for p in claude.iterdir()),
+                         ["study-lab", "study-task", "teach"])
+        self.assertEqual((claude / "study-task" / "references" / "x.md").read_text(
+            encoding="utf-8"), "v1")
+        (claude / "study-task" / "stray.md").write_text("", encoding="utf-8")
+        self.skill(self.skills, "study-lab", "v2")
+        self.assertEqual(agent.status("claude")["skills_stale"], ["study-lab", "study-task"])
+        agent.install("claude")
+        self.assertFalse((claude / "study-task" / "stray.md").exists())
+        self.assertIn("v2", (claude / "study-lab" / "SKILL.md").read_text(encoding="utf-8"))
+        self.assertEqual((claude / "teach" / "references" / "x.md").read_text(encoding="utf-8"),
+                         "моё")
+        agent.install("gemini")
+        self.assertTrue((self.root / ".agents" / "skills" / "study-lab" / "SKILL.md").exists())
+        self.assertTrue(agent.status("codex")["skills_stale"] == [])
+        self.assertIn(".agents/skills", agent.render([agent.status("gemini")]))
 
 
 class UpdateNoteTest(unittest.TestCase):

@@ -30,7 +30,8 @@ def calls(path):
 
 def sources():
     launchers = ("study", "gitverse", "sourcecraft", "rutube", "labrelease", "install.py")
-    return [*HERE.glob("src/*/*.py"), *HERE.glob("tests/*.py"), *(HERE / n for n in launchers)]
+    return [*HERE.glob("src/*/*.py"), *HERE.glob("skills/*/scripts/*.py"),
+            *HERE.glob("tests/*.py"), *(HERE / n for n in launchers)]
 
 
 class EncodingTest(unittest.TestCase):
