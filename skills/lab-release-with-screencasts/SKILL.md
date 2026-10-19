@@ -30,9 +30,10 @@ not run the lab steps yourself.
 4. **Slides** `labs/labNN/presentation/<course>-labNN-presentation.qmd`, `make` →
    `_output/*.pdf` (beamer), `*.html` (revealjs).
 5. **Commit** `docs(labNN): add report and presentation`.
-6. **Git release.** Bump `version` in `package.json` (otherwise `standard-changelog` adds no
-   section) → `git flow release start X.Y.Z` → `standard-changelog -c .changelogrc.json` →
-   commit `chore(site): release X.Y.Z` → `git flow release finish -s X.Y.Z` →
+6. **Git release.** `git flow release start X.Y.Z` → bump `version` in `package.json` (after
+   `release start`: a dirty tree makes it fail; without the bump `standard-changelog` adds no
+   section) → `standard-changelog -c .changelogrc.json` → commit `chore(site): release X.Y.Z` →
+   `git flow release finish -s X.Y.Z` →
    `git push origin master develop --tags` and the same to `src` → copy `CHANGELOG.md` into
    `<course>/release/`.
 7. **Hosting releases.** In the repo: `labrelease publish NN`. The plan checks that the report
