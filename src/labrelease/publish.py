@@ -47,9 +47,9 @@ def files(course, num):
              (f"{base}-presentation.pdf", pres / "_output" / f"{base}-presentation.pdf"),
              (f"{base}-presentation.md", pres / f"{base}-presentation.qmd")]
     html = pres / "_output" / f"{base}-presentation.html"
-    missing = [str(p.relative_to(course.repo)) for _, p in plain if not p.is_file()]
+    missing = [p.relative_to(course.repo).as_posix() for _, p in plain if not p.is_file()]
     if not html.is_file():
-        missing.append(str(html.relative_to(course.repo)))
+        missing.append(html.relative_to(course.repo).as_posix())
     names = [n for n, _ in plain] + [f"{base}-presentation-html.zip", f"{base}-sources.zip"]
     return names, plain, html, missing
 

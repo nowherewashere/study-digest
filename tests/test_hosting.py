@@ -127,7 +127,7 @@ class GitVerseTest(HostingCase):
 
     def test_asset_converts_qmd_and_html(self):
         qmd = self.tmp / "lab01-report.qmd"
-        qmd.write_text("# Отчёт\n", encoding="utf-8")
+        qmd.write_bytes("# Отчёт\n".encode())
         html = self.tmp / "lab01-slides.html"
         html.write_text("<html>", encoding="utf-8")
         self.net.reply("POST", "/releases/7/assets?name=lab01-report.md", {})

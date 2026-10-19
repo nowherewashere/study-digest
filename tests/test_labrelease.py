@@ -33,8 +33,7 @@ class CourseCase(unittest.TestCase):
             (out / "image" / "fig.png").write_bytes(b"PNG")
             for f in files:
                 (out / f"nettech-lab01-{f}").write_bytes(f.encode())
-            (self.lab / part / f"nettech-lab01-{part}.qmd").write_text(f"# {part}\n",
-                                                                       encoding="utf-8")
+            (self.lab / part / f"nettech-lab01-{part}.qmd").write_bytes(f"# {part}\n".encode())
             (self.lab / part / "image").mkdir()
             (self.lab / part / "image" / "src.png").write_bytes(b"SRC")
         self.course = lab.Course(self.repo)
