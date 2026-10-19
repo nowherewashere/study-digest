@@ -6,8 +6,8 @@
 
 Talk to the user and write `NOTES.md` in Russian. Tool output is Russian as well.
 
-Just updated from 1.x (`study agent` shows the block «устарел», or there are no `study-*`
-skills yet): follow `.digest/docs/upgrade-2.0.md` once.
+No `study-*` skills in `.claude/skills/` or `.agents/skills/` yet means the tools were just
+updated from 1.x: follow `.digest/docs/upgrade-2.0.md` once.
 
 ## Layout
 

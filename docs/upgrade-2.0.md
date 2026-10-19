@@ -5,8 +5,9 @@
 > new commands or profile names. Do the steps below once, tell the user what was done, and do
 > not come back to this file.
 
-You are here if `study --version` is v2.x and `study agent` shows the block «устарел» or the
-skills are missing (no `study-*` folders in `.claude/skills/` or `.agents/skills/`).
+You are here if `study --version` is v2.x and there are no `study-*` skill folders in
+`.claude/skills/` or `.agents/skills/` yet. A stale block alone («устарел» in `study agent`)
+is an ordinary update — `study agent <operator>` is enough, this file is not needed.
 
 1. **Instruction and skills.** `study agent` lists the operator files; for every one marked
    «устарел» run `study agent <operator>`. It rewrites the block and copies the skills.
