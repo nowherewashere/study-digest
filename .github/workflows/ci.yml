@@ -20,11 +20,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-      - name: Тесты
+      - name: Tests
         run: python -m unittest -v
-      - name: Синтаксис
+      - name: Syntax
         run: python -m compileall -q src skills study gitverse sourcecraft rutube labrelease install.py
-      - name: Лаунчеры
+      - name: Launchers
         run: |
           python study --version
           python gitverse --help

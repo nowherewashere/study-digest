@@ -14,7 +14,7 @@ HINTS = {
                                 "сводка такой курс в «Баллах» пропускает.",
     "invalidrecord": "Функция не входит в службу этого токена: у служб РУДН свои ключи.",
     "notoken": "Статические токены — строками в .digest/config.env (их спрашивает `study setup`), "
-               "Rutube — `rutube jwt` или `rutube login`. См. README.md, «Установка».",
+               "Rutube — `rutube jwt` или `rutube login`. См. .digest/docs/configuration.md.",
     "certificate": "Python не нашёл корневые сертификаты. macOS со сборкой python.org: "
                    "запусти «Install Certificates.command» из папки Python в /Applications; "
                    "иначе проверь прокси или антивирус, подменяющий TLS.",

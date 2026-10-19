@@ -25,8 +25,8 @@ Add the course id to `COURSE_IGNORE=` in `.digest/config.env` (or `study courses
      and screencasts (Kulyabov's and Korolkova's courses);
    - `direct` — everything else: the answer goes straight into TUIS.
 3. `study files <folder> --pull` — materials into `stash/`.
-4. Fill the `NOTES.md` header from the syllabus and grading rules in `stash/` (programme, БРС,
-   ФОС): course in TUIS, teacher, submission format, grading. Fill «Задания и сроки» from
+4. Fill the `NOTES.md` header from the syllabus and grading rules in `stash/` (programme, БРС — the
+   grading scheme, ФОС — the assessment materials): course in TUIS, teacher, submission format, grading. Fill «Задания и сроки» from
    `study assigns --course <folder>`.
 
 For `direct` courses also record in the header what the title page needs: faculty, department,

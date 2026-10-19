@@ -1,102 +1,61 @@
-# GitVerse и SourceCraft: справочник API
+# GitVerse and SourceCraft API
 
-> Для кого: тот, кто правит `src/hosting/client.py` или зовёт `gitverse api` / `sourcecraft api`.
-> Когда читать: при добавлении хостинга и при непонятном 4xx.
+> Audience: whoever edits `src/hosting/client.py` or calls `gitverse api` / `sourcecraft api`.
+> Read when adding a hosting or when a request fails with an unclear 4xx.
 
-Два хостинга кода, на которых лежит репозиторий курса: GitVerse — основной (remote `origin`),
-SourceCraft — зеркало (remote `src`). По чек-листу курса релиз с файлами отчёта и
-презентации нужен на обоих.
+The course repository lives on two hostings: GitVerse is the main one (remote `origin`),
+SourceCraft is the mirror (remote `src`). A lab release with the report and slides goes to both.
 
-Токены: строками `GITVERSE_TOKEN` и `SOURCECRAFT_TOKEN` в `config.env` (права 600).
-Репозиторий определяется по git-remote того каталога, откуда запущена команда (`origin` для
-GitVerse, `src` для SourceCraft; remote на другой хостинг не считается); если его нет —
-из `GV_REPO` / `SC_REPO` в `config.env`. Так одна и та же команда работает для всех курсов.
+Tokens: `GITVERSE_TOKEN` and `SOURCECRAFT_TOKEN` in `config.env`. The repository comes from the
+git remote of the current directory (`origin` for GitVerse, `src` for SourceCraft; a remote
+pointing to another host is ignored), otherwise from `GV_REPO` / `SC_REPO` in `config.env`.
+
+Quirks of both APIs (headers, body format, field names, file types) are handled in the client and
+pinned by `tests/test_hosting.py`; this page lists only the endpoints and what the APIs cannot do.
 
 ## GitVerse
 
-База `https://api.gitverse.ru`, авторизация `Authorization: Bearer <токен>`.
+Base `https://api.gitverse.ru`, `Authorization: Bearer <token>`.
 
-| Запрос | Назначение |
-|--------|-----------|
-| `GET /repos/{owner}/{repo}` | сведения о репозитории |
-| `GET /repos/{owner}/{repo}/releases` | список релизов — **голый массив** |
-| `POST /repos/{owner}/{repo}/releases` | создать релиз |
-| `PATCH /repos/{owner}/{repo}/releases/{id}` | изменить релиз |
-| `POST /repos/{owner}/{repo}/releases/{id}/assets?name=<имя>` | вложение, multipart |
-| `GET /repos/{owner}/{repo}/branches`, `/contents/{path}` | ветки, файлы |
+| Request | Purpose |
+|---------|---------|
+| `GET /repos/{owner}/{repo}/releases` | list releases (a bare array) |
+| `POST /repos/{owner}/{repo}/releases` | create: `tag_name`, `target_commitish` (full SHA), `name`, `body`, `draft`, `prerelease` |
+| `PATCH /repos/{owner}/{repo}/releases/{id}` | edit `name`, `body` |
+| `POST /repos/{owner}/{repo}/releases/{id}/assets?name=<file>` | upload an asset, multipart |
+| `GET /repos/{owner}/{repo}`, `/branches`, `/contents/{path}` | repository, branches, files |
 
-Тело создания релиза: `tag_name`, `target_commitish`, `name`, `body`, `draft`, `prerelease`.
+Release page: `https://gitverse.ru/{owner}/{repo}/releases/tag/{tag}`.
 
-Ссылка на релиз для человека: `https://gitverse.ru/{owner}/{repo}/releases/tag/{tag}`.
+What the API cannot do:
 
-**Грабли, каждая стоила времени:**
-
-1. **Обязателен заголовок** `Accept: application/vnd.gitverse.object+json;version=1`. Без него —
-   400 с пустым телом, без единого намёка на причину.
-2. **JSON-тело без хвостового перевода строки.** Если тело записано в файл через `print()` и
-   отправлено целиком, сервер отвечает 422 с пустым телом. Сериализовать и отправлять байты как
-   есть, ничего не дописывая в конец.
-3. **`target_commitish` — только полный SHA коммита.** Имя ветки не принимается: 422.
-   Значение берётся как `git rev-parse <тег>^{commit}`.
-4. **Вложения**: имя файла передаётся query-параметром `?name=`, сам файл — в multipart-поле
-   **`attachment`**. Расширения `.qmd` и `.html` отклоняются с `VALIDATION_ERROR`: клиент
-   сам грузит `.qmd` под именем `.md`, а `.html` — в zip `<имя>-html.zip`.
-5. Официального CLI нет. Документация `docs/public-api` временами отдаёт 404; OpenAPI-спека
-   лежит в самом GitVerse: репозиторий `gitverse/rest-api-description`, файл `v1/openapi-1.9.json`
-   (raw-ссылки не работают, тянуть через `GET /repos/gitverse/rest-api-description/contents/…`
-   и раскодировать base64).
-6. **Создание репозитория из шаблона API не умеет** — только веб-интерфейс.
-7. **PR из форка в чужой репозиторий API не создаёт**: `POST /repos/{owner}/{repo}/pulls`
-   отвечает 400 при любой форме `head`. Внутри одного репозитория работает; веб-интерфейс
-   временами падает с «Сервис временно недоступен».
+- No official CLI, and `docs/public-api` is sometimes 404. The OpenAPI spec lives in GitVerse
+  itself: repository `gitverse/rest-api-description`, file `v1/openapi-1.9.json`; raw links do not
+  work — fetch it with `GET /repos/gitverse/rest-api-description/contents/…` and decode base64.
+- Creating a repository from a template — web interface only.
+- A pull request from a fork into someone else's repository: `POST /repos/{owner}/{repo}/pulls`
+  returns 400 for any form of `head`. Inside one repository it works. The web interface
+  sometimes fails with «Сервис временно недоступен» — retry later.
 
 ## SourceCraft
 
-База `https://api.sourcecraft.tech`, авторизация `Authorization: Bearer <токен>`.
-Swagger открыт: `https://api.sourcecraft.tech/sourcecraft.swagger.json`.
+Base `https://api.sourcecraft.tech`, `Authorization: Bearer <token>`. Swagger:
+`https://api.sourcecraft.tech/sourcecraft.swagger.json`.
 
-| Запрос | Назначение |
-|--------|-----------|
-| `GET /repos/{org}/{repo}/releases` | список — **объект** `{"releases": [...]}` |
-| `POST /repos/{org}/{repo}/releases` | создать релиз |
-| `POST /repos/{org}/{repo}/releases/tag/{tag}/attachments` | вложение, multipart |
-| `PATCH /repos/{org}/{repo}/releases/tag/{tag}` | изменить релиз (`title`, `release_notes`); по id — 404 |
-| `POST /orgs/{org}/repos` | создать репозиторий |
-| `GET /repos/{org}/{repo}` | сведения о репозитории |
+| Request | Purpose |
+|---------|---------|
+| `GET /repos/{org}/{repo}/releases` | list releases (`{"releases": [...]}`) |
+| `POST /repos/{org}/{repo}/releases` | create: `tag`, `title`, `release_notes`, `publish` (no `target_branch` for an existing tag) |
+| `PATCH /repos/{org}/{repo}/releases/tag/{tag}` | edit `title`, `release_notes` (by tag, not by id) |
+| `POST /repos/{org}/{repo}/releases/tag/{tag}/attachments` | upload an asset, multipart |
+| `GET /repos/{org}/{repo}`, `POST /orgs/{org}/repos` | repository, create a repository |
 
-Тело создания релиза: `tag`, `title`, `release_notes`, `publish` и необязательный `target_branch`.
-Это то же самое, что делает `src release create --publish`, поэтому **CLI `src` не нужен**.
-**`target_branch` не передавать, если тег уже запушен**: с ним сервер сам создаёт тег и отвечает
-`409 BranchAlreadyExists`. Без поля релиз вешается на существующий тег.
+Release page: `https://sourcecraft.dev/{org}/{repo}/releases/{tag}`. The official `src` CLI is
+not needed: everything goes through REST.
 
-Ссылка на релиз для человека: `https://sourcecraft.dev/{org}/{repo}/releases/{tag}`.
+## Release notes and links
 
-**Грабли:**
-
-1. **Вложение грузится строго в поле `file`** (не `attachment`, как у GitVerse). Ошибка при
-   неверном имени поля внятная: `multipart/form must have file provided in "file" field`.
-2. **Форма ответа отличается** от GitVerse: список релизов — объект с ключом `releases`,
-   поля называются `tag`, `title`, `status`, вложения лежат в `assets`.
-3. Расширения не ограничены: `.qmd` и `.html` принимаются как есть.
-4. Официальный CLI `src` берёт токен из переменной `SOURCECRAFT_TOKEN`, отдельный `login`
-   не нужен; инструменту он не требуется — всё делается через REST.
-5. Адрес remote — вида `ssh://ssh.sourcecraft.dev/{org}/{repo}.git`, **без `git@`**. Разбор
-   remote должен переживать и такую форму, и `ssh://git@host:port/…`, и `git@host:…`, и `https://…`.
-
-## Что общего
-
-- Оба принимают Bearer-токен и отдают JSON.
-- Оба различают репозиторий по паре `владелец/имя`.
-- Формы ответов и имена полей у них **разные**, поэтому в коде они за одним интерфейсом
-  (`releases`, `release`, `asset`, `web_url`), а различия спрятаны внутри классов.
-- Порядок выпуска релиза — скилл `lab-release-with-screencasts`: сначала отчёт и
-  презентация, потом тег через git-flow, и только потом `labrelease publish` — релиз с файлами.
-
-## Описания релизов и ссылки
-
-Оба хостинга принимают Markdown. Правка выпущенного релиза: GitVerse — `PATCH /repos/{o}/{r}/releases/{id}`
-(`name`, `body`), SourceCraft — `PATCH /repos/{org}/{repo}/releases/tag/{tag}` (`title`, `release_notes`).
-В CLI это `gitverse update <тег> --notes F --title T` и `sourcecraft update …`. SourceCraft-клиент подменяет
-в заметках `https://gitverse.ru/<gv-repo>` на `https://sourcecraft.dev/<sc-repo>` (метод `localize`):
-адрес коммита `/commit/<sha>` на обоих хостингах одинаков, а `compare` GitVerse не поддерживает —
-см. скилл `lab-release-with-screencasts`, раздел «CHANGELOG and links».
+Both hostings take Markdown. `sourcecraft release` and `sourcecraft update` rewrite
+`https://gitverse.ru/<gv-repo>` into `https://sourcecraft.dev/<sc-repo>`, so one CHANGELOG section
+serves both; why the CHANGELOG uses `/commit/` links and no compare links — skill
+`lab-release-with-screencasts`, «CHANGELOG and links».

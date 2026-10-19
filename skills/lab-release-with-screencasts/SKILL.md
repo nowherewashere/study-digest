@@ -12,6 +12,10 @@ exactly. Before the first lab in a course read «Регламент курса»
 from the template, `git flow init`, Git and GPG settings, first release); the primary source is
 `stash/000 Подготовка стенда.pdf`. Commits are Conventional Commits and GPG-signed.
 
+Two steps on GitVerse are web-only, the API cannot do them: creating the course repository from
+the teacher's template, and a pull request from your fork into the teacher's repository. Give the
+user the link and the exact clicks instead of trying `gitverse api`.
+
 The user performs the lab on camera. Prepare the environment and a cheat sheet beforehand; do
 not run the lab steps yourself.
 

@@ -80,5 +80,6 @@ Every command has `--help`; `--json` before or after the command name gives the 
 
 ## References
 
-`.digest/README.md` — install and commands; `.digest/docs/tuis-api.md` — Moodle calls;
-`.digest/docs/hosting-api.md` — GitVerse and SourceCraft API.
+`.digest/docs/`: `cli.md` — every command, `--json` fields, exit codes; `configuration.md` —
+`config.env`, tokens, courses, snapshot, updates; `daily-digest.md` — setting up the morning
+task; `tuis-api.md`, `hosting-api.md` — the APIs.
