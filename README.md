@@ -115,14 +115,15 @@ All commands: [docs/cli.md](docs/cli.md). Every command has `--help`.
 
 An AI agent task can run the digest every morning and print it as is:
 [docs/daily-digest.md](docs/daily-digest.md) (Claude Code Desktop, Linux, macOS, Windows, WSL).
-`study agent <claude|codex|gemini|copilot>` puts [the agent instructions](docs/AGENTS.md) into
+`study agent <claude|codex|gemini|copilot>` puts [the agent instructions](docs/agent.md) into
 the operator file and the [skills](skills/) into its skills folder; your own text and skills
 next to them stay untouched.
 
 ## Updating
 
 `study update` shows the incoming commits and whether they are signed, then pulls. The digest
-says when an update is available. Coming from 1.x: [docs/upgrade-2.0.md](docs/upgrade-2.0.md).
+says when an update is available. Coming from 1.x: the update itself hands the agent
+[the one-time migration steps](docs/AGENTS.md).
 
 Found a bug? Open an issue or a pull request — do not edit `.digest/` locally, `git pull
 --ff-only` stops on local commits. Development: [docs/development.md](docs/development.md).

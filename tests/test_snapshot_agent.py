@@ -106,6 +106,17 @@ class AgentTest(unittest.TestCase):
         self.assertEqual((self.root / "CLAUDE.md").read_text(encoding="utf-8"), text)
 
 
+    def test_old_marker_replaced_without_duplicate(self):
+        old = ("<!-- study:begin — блок обновляет `study agent`; править .digest/docs/AGENTS.md -->"
+               "\nмост с 1.x\n" + agent.END + "\n")
+        (self.root / "CLAUDE.md").write_text("# Моё\n\n" + old + "\n# После\n", encoding="utf-8")
+        self.assertEqual((agent.status("claude")["installed"], agent.status("claude")["current"]),
+                         (True, False))
+        agent.install("claude")
+        text = (self.root / "CLAUDE.md").read_text(encoding="utf-8")
+        self.assertEqual(text, "# Моё\n\n" + agent.block() + "\n# После\n")
+        self.assertTrue(agent.status("claude")["current"])
+
     def test_skills_synced_and_foreign_kept(self):
         self.skill(self.skills, "study-task", "v1")
         self.skill(self.skills, "study-lab", "v1")

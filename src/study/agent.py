@@ -3,7 +3,7 @@ import shutil
 from kit.cli import table
 from kit.config import HERE, ROOT
 
-SOURCE = HERE / "docs" / "AGENTS.md"
+SOURCE = HERE / "docs" / "agent.md"
 SKILLS = HERE / "skills"
 OWNER = "source: study-digest"
 OPERATORS = {
@@ -13,7 +13,8 @@ OPERATORS = {
     "gemini": ("Gemini CLI", "GEMINI.md", ".agents/skills"),
     "copilot": ("GitHub Copilot в редакторе", ".github/copilot-instructions.md", ".agents/skills"),
 }
-BEGIN = "<!-- study:begin — блок обновляет `study agent`; править .digest/docs/AGENTS.md -->"
+MARK = "<!-- study:begin"
+BEGIN = MARK + " — блок обновляет `study agent`; править .digest/docs/agent.md -->"
 END = "<!-- study:end -->"
 
 
@@ -54,7 +55,7 @@ def status(operator):
     name, rel, skills = OPERATORS[operator]
     path = ROOT / rel
     text = path.read_text(encoding="utf-8") if path.exists() else ""
-    has_block = BEGIN in text and END in text
+    has_block = MARK in text and END in text
     diff = skills_diff(operator)
     return {"operator": operator, "name": name, "path": str(path), "file": rel,
             "exists": path.exists(), "installed": has_block, "skills": skills,
@@ -80,7 +81,7 @@ def install(operator):
     path = ROOT / OPERATORS[operator][1]
     new = block()
     text = path.read_text(encoding="utf-8") if path.exists() else ""
-    i, j = text.find(BEGIN), text.find(END)
+    i, j = text.find(MARK), text.find(END)
     if 0 <= i < j:
         rest = text[j + len(END):]
         text = text[:i] + new + (rest[1:] if rest.startswith("\n") else rest)

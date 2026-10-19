@@ -20,7 +20,8 @@ CI runs the same on Linux, macOS and Windows with Python 3.8 and 3.12.
 ├── src/rutube/       Rutube client and CLI
 ├── src/labrelease/   lab on camera: publish · answer · lab · cli
 ├── skills/           agent skills, copied out by study agent
-├── docs/             documentation; AGENTS.md is the agent instruction block
+├── docs/             documentation; agent.md is the agent instruction block,
+│                     AGENTS.md only the 1.x → 2.0 bridge
 ├── tests/            unittest; fixtures/ hold TUIS replies and the reference digest
 └── install.py        installer: dependencies, clone, then study setup
 ```
@@ -35,7 +36,7 @@ CI runs the same on Linux, macOS and Windows with Python 3.8 and 3.12.
 | digest layout | `src/study/digest.py`, `render` |
 | a new TUIS data source | `src/study/moodle.py`, `digest.py`, a row in `docs/tuis-api.md` |
 | a new code hosting | a class in `src/hosting/client.py`, `docs/hosting-api.md` |
-| agent rules / scenarios | `docs/AGENTS.md` / `skills/<skill>/`, then `study agent <operator>` |
+| agent rules / scenarios | `docs/agent.md` / `skills/<skill>/`, then `study agent <operator>` |
 | a new AI operator | `OPERATORS` in `src/study/agent.py` |
 
 ## Rules
