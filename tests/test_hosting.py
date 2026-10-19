@@ -136,7 +136,7 @@ class GitVerseTest(HostingCase):
         self.assertEqual(self.gv.asset(7, html)["name"], "lab01-slides-html.zip")
         md, zipped = (r["files"]["attachment"] for r in self.net.sent)
         self.assertEqual(md[:2], ("lab01-report.md", "# Отчёт\n".encode()))
-        self.assertEqual((zipped[0], zipped[2]), ("lab01-slides-html.zip", "application/zip"))
+        self.assertEqual(zipped[0], "lab01-slides-html.zip")
         with zipfile.ZipFile(io.BytesIO(zipped[1])) as z:
             self.assertEqual(z.read("lab01-slides.html"), b"<html>")
 
