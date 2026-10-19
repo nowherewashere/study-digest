@@ -1,6 +1,6 @@
 ---
 name: study-course
-description: Set up a course folder — `CODE`/`FLOW` lines, `stash/`, `NOTES.md` from the syllabus, memory note. Use for a new course, when the digest shows «Без папки (файлы не скачиваются)» or «Новый курс в ТУИС», or when a course has no `NOTES.md`.
+description: Set up a course folder — `CODE`/`FLOW` lines, `stash/`, `NOTES.md` from the syllabus. Use for a new course, when the digest shows «Без папки (файлы не скачиваются)» or «Новый курс в ТУИС», or when a course has no `NOTES.md`.
 metadata:
   source: study-digest
 ---
@@ -28,7 +28,6 @@ Add the course id to `COURSE_IGNORE=` in `.digest/config.env` (or `study courses
 4. Fill the `NOTES.md` header from the syllabus and grading rules in `stash/` (programme, БРС,
    ФОС): course in TUIS, teacher, submission format, grading. Fill «Задания и сроки» from
    `study assigns --course <folder>`.
-5. If the operator keeps memories, add one named `subj-<folder>` with the essentials.
 
 For `direct` courses also record in the header what the title page needs: faculty, department,
 group, teacher — the `study-lab` report template takes them from here.
