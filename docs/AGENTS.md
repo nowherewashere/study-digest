@@ -6,6 +6,9 @@
 
 Talk to the user and write `NOTES.md` in Russian. Tool output is Russian as well.
 
+Just updated from 1.x (`study agent` shows the block «устарел», or there are no `study-*`
+skills yet): follow `.digest/docs/upgrade-2.0.md` once.
+
 ## Layout
 
 - `.digest/` — the tools (Python, stdlib only) and their settings: `study` (TUIS = Moodle),

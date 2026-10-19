@@ -421,6 +421,13 @@ rutube upload <файл> | --url U [--title T] [--category N] [--age A] [--hidde
 с заметками по conventional commits; `study --version` печатает тег и число коммитов
 после него. `master` всегда рабочий — именно его ставит `install.py`.
 
+**С 1.x на 2.0.** `study update` из 1.x подтянет 2.0 и перепишет блок агента, но скиллы,
+новые команды в PATH и имена профилей — уже работа агента: новая инструкция отправляет его
+один раз в [`docs/upgrade-2.0.md`](docs/upgrade-2.0.md). Там же таблица «было → стало»:
+`study gv/sc/rt` → `gitverse`/`sourcecraft`/`rutube`, `study answer` → `labrelease answer`,
+`study digest` и `state --local` убраны, `FLOW release|file` → `screencast|direct` (старые
+значения читаются). Токены, `.secrets/`, `tuis/labNN.env` и снимок сводки — прежние.
+
 **Нашли ошибку.** Issue или pull request в этот репозиторий. Локально код не править:
 `study update` делает `git pull --ff-only`, локальный коммит его остановит, а незакоммиченная
 правка того же файла даст конфликт.
@@ -466,6 +473,7 @@ rutube upload <файл> | --url U [--title T] [--category N] [--age A] [--hidde
 | Файл | Для кого |
 |------|----------|
 | [`docs/AGENTS.md`](docs/AGENTS.md) | ИИ-агент: что здесь лежит, команды, правила, какой скилл когда — ставится `study agent` |
+| [`docs/upgrade-2.0.md`](docs/upgrade-2.0.md) | агенту: разовый переход с 1.x |
 | [`skills/`](skills/) | скиллы агента: сводка, разбор задания, отчёт по ГОСТ, лаба под запись, курс, обновление |
 | [`docs/tuis-api.md`](docs/tuis-api.md) | ручки Moodle и их особенности |
 | [`docs/hosting-api.md`](docs/hosting-api.md) | API GitVerse и SourceCraft |
