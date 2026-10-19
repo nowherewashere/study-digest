@@ -1,7 +1,8 @@
 import os
 import unittest
 
-from study.config import Config, StudyError
+from kit.config import ToolError
+from study.config import Config
 from tests.fakes import tmpdir
 
 
@@ -40,18 +41,18 @@ class ConfigTest(unittest.TestCase):
         (self.dir / "t").write_text("fromfile\n", encoding="utf-8")
         cfg = self.write(f"RUTUBE_TOKEN_FILE={self.dir / 't'}\n")
         self.assertEqual(cfg.token("RUTUBE_TOKEN"), "fromfile")
-        with self.assertRaises(StudyError) as e:
+        with self.assertRaises(ToolError) as e:
             self.write("").token("TUIS_TOKEN")
         self.assertEqual(e.exception.code, "notoken")
         self.assertTrue(e.exception.hint())
 
     def test_put(self):
-        cfg = self.write("# пример\nTUIS_TOKEN=old\nCODE 5 five\nDIGEST_DAYS=7\n")
+        cfg = self.write("# пример\nTUIS_TOKEN=old\nCODE 5 five\nTUIS_TOKEN=dup\nDIGEST_DAYS=7\n")
         cfg.put("TUIS_TOKEN", "new")
         cfg.put("GITVERSE_TOKEN", "gv")
         self.assertEqual(self.path.read_text(encoding="utf-8"),
-                         "# пример\nCODE 5 five\nDIGEST_DAYS=7\n"
-                         "TUIS_TOKEN=new\nGITVERSE_TOKEN=gv\n")
+                         "# пример\nTUIS_TOKEN=new\nCODE 5 five\nDIGEST_DAYS=7\n"
+                         "GITVERSE_TOKEN=gv\n")
         self.assertEqual((cfg.token("TUIS_TOKEN"), cfg.get("GITVERSE_TOKEN")), ("new", "gv"))
         self.assertEqual(Config(self.path).codes(), {5: "five"})
         if os.name == "posix":
@@ -81,23 +82,27 @@ class ConfigTest(unittest.TestCase):
     def test_write_courses(self):
         cfg = self.write("A=1\nCOURSE_IGNORE=1\nCODE 5 five\nCOURSE 7 x Старое\n# CODE 8 keep\n"
                          "FLOW 5 file\nFLOW 7 release\n")
-        self.assertEqual(cfg.flows(), {5: "file", 7: "release"})
+        self.assertEqual(cfg.flows(), {5: "direct", 7: "screencast"})
+        self.assertEqual(cfg.flow("five"), "direct")
         cfg.write_courses({3}, {5: "five", 8: "eight"})
         self.assertEqual(self.path.read_text(encoding="utf-8"),
                          "A=1\n# CODE 8 keep\nCOURSE_IGNORE=3\nCODE 5 five\nCODE 8 eight\n"
-                         "FLOW 5 file\n")
+                         "FLOW 5 direct\n")
         if os.name == "posix":
             self.assertEqual(oct(self.path.stat().st_mode)[-3:], "600")
         self.assertEqual(Config(self.path).codes(), {5: "five", 8: "eight"})
-        cfg.write_courses({3}, {5: "five", 8: "eight"}, {5: "release", 8: "file"})
+        with self.assertRaises(ToolError) as e:
+            Config(self.path).flow("eight")
+        self.assertIn("FLOW <id> screencast|direct", e.exception.message)
+        cfg.write_courses({3}, {5: "five", 8: "eight"}, {5: "screencast", 8: "direct"})
         self.assertTrue(self.path.read_text(encoding="utf-8")
-                        .endswith("CODE 8 eight\nFLOW 5 release\nFLOW 8 file\n"))
-        self.assertEqual(Config(self.path).flows(), {5: "release", 8: "file"})
+                        .endswith("CODE 8 eight\nFLOW 5 screencast\nFLOW 8 direct\n"))
+        self.assertEqual(Config(self.path).flows(), {5: "screencast", 8: "direct"})
 
     def test_flow_bad_value(self):
-        with self.assertRaises(StudyError) as e:
+        with self.assertRaises(ToolError) as e:
             self.write("CODE 5 five\nFLOW 5 git\n")
-        self.assertIn("FLOW 5: ожидается release или file", e.exception.message)
+        self.assertIn("FLOW 5: ожидается screencast или direct", e.exception.message)
 
 
 if __name__ == "__main__":

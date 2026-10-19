@@ -17,20 +17,22 @@ try:
 except ImportError:
     winreg = None
 
-from . import agent, courses, files, local
-from .config import HERE, ROOT, StudyError
+from kit.config import HERE, ROOT, ToolError
+
+from . import agent, courses, files
 from .moodle import Moodle
 from .snapshot import load_state
 
 STEPS = ["Токены", "Каталоги", "Проверка", "Оператор", "Курсы"]
+COMMANDS = ("study", "gitverse", "sourcecraft", "rutube", "labrelease")
 RULE = "-" * 72
 POSIX = os.name == "posix"
 TOKENS = [
     ("TUIS_TOKEN", "Moodle (нужен для сводки)",
      "профиль -> Ключи безопасности -> служба Moodle mobile web service", "/user/managetoken.php"),
-    ("GITVERSE_TOKEN", "GitVerse (необязательно)",
+    ("GITVERSE_TOKEN", "GitVerse (лабы под запись, необязательно)",
      "иконка пользователя -> Настройки -> Управление токенами, доступ Репозитории", None),
-    ("SOURCECRAFT_TOKEN", "SourceCraft (необязательно)",
+    ("SOURCECRAFT_TOKEN", "SourceCraft (лабы под запись, необязательно)",
      "Home -> Access -> Personal Access Tokens", None),
 ]
 NEXT = """
@@ -38,13 +40,13 @@ NEXT = """
   study state --pull       сводка: сроки, тесты, баллы, новое в курсах
   study files --pull       материалы всех курсов в stash/ (в пустую папку - всё, дальше - новое)
   study courses --setup    перенастроить курсы и папки
-  study agent <код>        файл инструкций для ИИ-оператора (claude, codex, gemini, copilot)
+  study agent <код>        инструкция и скиллы для ИИ-оператора (claude, codex, gemini, copilot)
   study update             обновить инструмент
 
   {B}Ежедневная сводка{N}
   Claude Code Desktop -> Code -> Routines -> New routine -> Local:
   рабочая папка {root},
-  в Instructions - текст из {prompt}"""
+  в Instructions - ссылка на скилл {prompt}"""
 
 
 
@@ -124,15 +126,15 @@ def bin_dir():
     return pathlib.Path.home() / ".local" / "bin"
 
 
-def link_command():
-    launcher, b = HERE / "study", bin_dir()
+def link_command(name):
+    launcher, b = HERE / name, bin_dir()
     b.mkdir(parents=True, exist_ok=True)
     if POSIX:
-        link = b / "study"
+        link = b / name
         if link.is_symlink() or link.exists():
             link.unlink()
         link.symlink_to(launcher)
-        return f"~/.local/bin/study -> {launcher}"
+        return f"~/.local/bin/{name} -> {launcher}"
     py = pathlib.Path(sys.executable)
     home = re.escape(str(pathlib.Path.home()))
     cmd = re.sub(home, "%USERPROFILE%", f'@"{py}" "{launcher}" %*\r\n', flags=re.IGNORECASE)
@@ -140,10 +142,10 @@ def link_command():
         raw = cmd.encode("oem")
     except (UnicodeEncodeError, LookupError):
         raw = cmd.encode("utf-8")
-    (b / "study.cmd").write_bytes(raw)
+    (b / f"{name}.cmd").write_bytes(raw)
     sh = f'#!/bin/sh\nexec "{py.as_posix()}" "{launcher.as_posix()}" "$@"\n'
-    (b / "study").write_bytes(sh.encode("utf-8"))
-    return f"{b / 'study.cmd'} -> {launcher}"
+    (b / name).write_bytes(sh.encode("utf-8"))
+    return f"{b / (name + '.cmd')} -> {launcher}"
 
 
 def user_path():
@@ -237,7 +239,7 @@ def dirs(s, cfg):
     codes = cfg.codes()
     titles = load_state(cfg).get("courses") or {}
     for cid, code in codes.items():
-        made = courses.scaffold(code, cid, titles.get(str(cid)), local.flow_of(cfg, code))
+        made = courses.scaffold(code, cid, titles.get(str(cid)), cfg.flows().get(cid))
         s.ok(f"{ROOT / code}{os.sep}{{stash" + (",NOTES.md}" if made else "}"))
     if not codes:
         s.note("папки курсов появятся на шаге «Курсы»")
@@ -246,18 +248,20 @@ def dirs(s, cfg):
 def check(s, m):
     try:
         s.ok("Moodle отвечает: " + m.me()["fullname"].strip())
-    except StudyError:
+    except ToolError:
         s.warn("Moodle не отвечает: проверь токен и TUIS_URL в config.env")
-    try:
-        s.ok("команда study: " + link_command())
-    except OSError as e:
-        s.warn(f"команда study не поставлена ({e}): запускай {HERE / 'study'}")
-        return
+    for name in COMMANDS:
+        try:
+            s.ok(f"команда {name}: " + link_command(name))
+        except OSError as e:
+            s.warn(f"команда {name} не поставлена ({e}): запускай {HERE / name}")
+            return
     path_hint(s)
 
 
 def operator(s):
-    s.note("инструкция для агента (.digest/docs/AGENTS.md) кладётся блоком в файл оператора")
+    s.note("инструкция для агента (.digest/docs/AGENTS.md) кладётся блоком в файл оператора,")
+    s.note("скиллы (.digest/skills/) - в каталог скиллов оператора")
     s.note("в корне учебной директории; всё вне блока - личные правила, они не трогаются")
     print()
     if not sys.stdin.isatty():
@@ -283,7 +287,7 @@ def courses_(s, cfg, m):
         return
     try:
         out = courses.setup(cfg, courses.rows(cfg, m))
-    except StudyError:
+    except ToolError:
         s.warn("не удалось (нет токена Moodle?): позже study courses --setup")
         return
     print("config.env обновлён: COURSE_IGNORE ({}), CODE ({})".format(
@@ -298,7 +302,7 @@ def courses_(s, cfg, m):
         for d in files.walk(cfg, m, do_pull=True, progress=progress):
             progress.clear()
             print("  " + files.summary(d, pulled=True))
-    except StudyError:
+    except ToolError:
         progress.clear()
         s.warn("не всё скачалось: позже study files --pull")
     else:
@@ -320,4 +324,4 @@ def run(cfg):
     for i, fn in enumerate(plan, len(done) + 1):
         s.step(i)
         fn()
-    return s.log, s.final(ROOT, HERE / "docs" / "daily-digest-prompt.md")
+    return s.log, s.final(ROOT, ROOT / ".claude" / "skills" / "study-digest" / "SKILL.md")

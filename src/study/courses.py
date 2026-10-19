@@ -1,9 +1,11 @@
 import sys
 import time
 
-from . import local
-from .config import ROOT
-from .fmt import table
+from kit.cli import table
+from kit.config import ROOT
+
+from .config import FLOWS, SKILLS
+from .fmt import msk
 
 NOTES = """# {title} — заметки
 
@@ -26,8 +28,9 @@ NOTES = """# {title} — заметки
 """
 
 
-FLOW_NOTE = {"release": "релиз репозитория со скринкастами (`study answer`)",
-             "file": "файлом (`study submit <id> --attach`)"}
+FLOW_NOTE = {"screencast": "лаба под запись: репозиторий, релиз, скринкасты (скилл {})"
+                           .format(SKILLS["screencast"]),
+             "direct": "ответ прямо в ТУИС: текст и/или файлы (скилл {})".format(SKILLS["direct"])}
 
 
 def scaffold(code, cid, title=None, flow=None):
@@ -42,7 +45,7 @@ def scaffold(code, cid, title=None, flow=None):
 
 
 def seen(ts):
-    return time.strftime("%Y-%m-%d", time.localtime(ts)) if ts else "никогда"
+    return msk(ts).strftime("%Y-%m-%d") if ts else "никогда"
 
 
 def rows(cfg, moodle, include_hidden=False):
@@ -52,7 +55,6 @@ def rows(cfg, moodle, include_hidden=False):
     return [{"id": c["id"], "shortname": c.get("shortname"), "title": c["fullname"],
              "lastaccess": c.get("lastaccess") or 0, "code": codes.get(c["id"]),
              "flow": flows.get(c["id"]), "ignored": c["id"] in ignore,
-             "guess": local.flow_of(cfg, codes[c["id"]]) if c["id"] in codes else None,
              "stale": not c.get("lastaccess") or now - c["lastaccess"] > win}
             for c in moodle.courses(include_hidden=include_hidden)]
 
@@ -62,13 +64,12 @@ def render(rows_):
     return "\n".join([
         table([[str(r["id"]), seen(r["lastaccess"]),
                 "игнор" if r["ignored"] else ("старый?" if r["stale"] else ""),
-                r["code"] or "-", r["flow"] or (r["guess"] + "?" if r["guess"] else "-"),
+                r["code"] or "-", r["flow"] or "-",
                 r["title"]] for r in rows_],
               ["id", "заходил", "", "папка", "сдача", "курс"]),
         "", "Строка для config.env — курсы, которые НЕ отслеживать (кандидаты «старый?»):",
         f"COURSE_IGNORE={stale}", "",
-        ("Папку курса задать: CODE <id> <имя-папки>; сдачу — FLOW <id> release|file "
-         "(«?» — угадано: release, если в папке есть репозиторий, иначе file)")])
+        "Папку курса задать: CODE <id> <имя-папки>; сдачу — FLOW <id> " + "|".join(FLOWS)])
 
 
 def setup(cfg, rows_):
@@ -107,8 +108,8 @@ def setup(cfg, rows_):
             if tok.isdigit() and int(tok) in num:
                 ignore_ids ^= {num[int(tok)]["id"]}
 
-    print("\nИмя локальной папки и сдача (release - релиз репозитория со скринкастами, "
-          "file - отчёт файлом) для каждого курса:")
+    print("\nИмя локальной папки и сдача (screencast - лаба под запись: репозиторий, релиз, "
+          "скринкасты; direct - ответ прямо в ТУИС) для каждого курса:")
     codes, flows = {}, {}
     for r in rows_:
         if r["id"] in ignore_ids:
@@ -116,9 +117,9 @@ def setup(cfg, rows_):
         default = r["code"] or str(r["id"])
         code = input(f"  {r['title'][:50]} [{default}]: ").strip() or default
         codes[r["id"]] = code
-        guess = r["flow"] or local.flow_of(cfg, code)
-        ans = input(f"    сдача, release|file [{guess}]: ").strip().lower()
-        flows[r["id"]] = {"r": "release", "f": "file"}.get(ans[:1], guess)
+        guess = r["flow"] or "direct"
+        ans = input(f"    сдача, screencast|direct [{guess}]: ").strip().lower()
+        flows[r["id"]] = {"s": "screencast", "d": "direct"}.get(ans[:1], guess)
 
     cfg.write_courses(ignore_ids, codes, flows)
     titles = {r["id"]: r["title"] for r in rows_}

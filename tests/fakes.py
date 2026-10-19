@@ -9,7 +9,7 @@ import unittest
 import urllib.parse
 from unittest import mock
 
-from study import net
+from kit import net
 from study.config import Config, Course
 from study.moodle import Moodle
 

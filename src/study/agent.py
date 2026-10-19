@@ -1,5 +1,5 @@
-from .config import HERE, ROOT
-from .fmt import table
+from kit.config import HERE, ROOT
+from kit.cli import table
 
 SOURCE = HERE / "docs" / "AGENTS.md"
 OPERATORS = {

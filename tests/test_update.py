@@ -6,7 +6,7 @@ import unittest
 from unittest import mock
 
 from study import agent, cli, update
-from study.config import StudyError
+from kit.config import ToolError
 from tests.fakes import git, patch, tmpdir
 
 
@@ -128,13 +128,13 @@ class UpdateTest(unittest.TestCase):
     def test_not_a_clone_and_fetch_failure(self):
         with mock.patch.object(update, "HERE", self.tmp / "plain"):
             self.assertIsNone(update.check())
-            with self.assertRaises(StudyError):
+            with self.assertRaises(ToolError):
                 update.apply()
         git(self.clone, "remote", "set-url", "origin", str(self.tmp / "nowhere.git"))
-        with self.assertRaises(StudyError) as e:
+        with self.assertRaises(ToolError) as e:
             update.check()
         self.assertIn("fetch не удался", e.exception.message)
-        real, calls = update.local.run, []
+        real, calls = update.run, []
 
         def silent(path, *args, **kw):
             if args[0] != "fetch":
@@ -142,7 +142,7 @@ class UpdateTest(unittest.TestCase):
             calls.append(kw["timeout"])
             return None
 
-        with mock.patch.object(update.local, "run", silent), self.assertRaises(StudyError) as e:
+        with mock.patch.object(update, "run", silent), self.assertRaises(ToolError) as e:
             update.check()
         self.assertEqual(calls, [update.FETCH_TIMEOUT] * 2)
         self.assertIn("нет ответа за 20 с, 2 попытки", e.exception.message)

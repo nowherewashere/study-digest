@@ -1,8 +1,10 @@
+import io
 import mimetypes
 import pathlib
+import zipfile
 
-from . import local, net
-from .config import StudyError
+from kit import git, net
+from kit.config import ToolError
 
 
 def compact(pairs):
@@ -11,7 +13,6 @@ def compact(pairs):
 
 class Hosting:
 
-    key = ""
     source = ""
     token_key = ""
     repo_key = ""
@@ -27,12 +28,12 @@ class Hosting:
     def __init__(self, cfg, path=None, repo=None):
         self.cfg = cfg
         self.path = pathlib.Path(path) if path else None
-        from_remote = self.path and local.repo_from_remote(self.path, self.remote, self.host)
+        from_remote = self.path and git.repo_from_remote(self.path, self.remote, self.host)
         self.repo = repo or from_remote or cfg.get(self.repo_key)
         if not self.repo:
-            raise StudyError(self.source,
-                             f"репозиторий не задан: запуск из каталога репозитория "
-                             f"(remote {self.remote}) или {self.repo_key} в config.env")
+            raise ToolError(self.source,
+                            f"репозиторий не задан: запуск из каталога репозитория "
+                            f"(remote {self.remote}) или {self.repo_key} в config.env")
 
     def headers(self):
         auth = "Bearer " + self.cfg.token(self.token_key)
@@ -45,21 +46,28 @@ class Hosting:
     def repo_url(self):
         return f"{self.web}/{self.repo}"
 
+    def payload(self, p, name):
+        if name.endswith(".qmd") and ".qmd" in self.bad_ext:
+            return name[:-4] + ".md", p.read_bytes()
+        if name.endswith(".html") and ".html" in self.bad_ext:
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+                z.write(p, name)
+            return name[:-5] + "-html.zip", buf.getvalue()
+        return name, p.read_bytes()
+
     def asset(self, target, path, name=None):
         p = pathlib.Path(path)
-        name = name or p.name
-        if name.endswith(self.bad_ext):
-            raise StudyError(self.source, f"{name}: {self.source} не принимает "
-                                          f"{' и '.join(self.bad_ext)} — класть .md или zip")
-        ctype = mimetypes.guess_type(p.name)[0] or "application/octet-stream"
-        part = (self.part_named and name) or p.name
+        wanted = name or p.name
+        name, data = self.payload(p, wanted)
+        ctype = mimetypes.guess_type(name)[0] or "application/octet-stream"
+        part = name if self.part_named or name != wanted else p.name
         self.api(self.asset_path(target, name),
-                 files=[(self.asset_field, part, p.read_bytes(), ctype)], timeout=900)
+                 files=[(self.asset_field, part, data, ctype)], timeout=900)
         return {"name": name, "ok": True}
 
 
 class GitVerse(Hosting):
-    key = "gv"
     source = "gitverse"
     token_key = "GITVERSE_TOKEN"
     repo_key = "GV_REPO"
@@ -79,14 +87,18 @@ class GitVerse(Hosting):
     def releases(self):
         out = self.api(f"/repos/{self.repo}/releases", retries=net.RETRIES) or []
         return [{"tag": r["tag_name"], "id": r["id"], "name": r.get("name"),
-                 "assets": len(r.get("assets") or []),
+                 "assets": [a["name"] for a in r.get("assets") or []],
                  "url": self.web_url(r["tag_name"])} for r in out]
+
+    @staticmethod
+    def target(release):
+        return release["id"]
 
     def release(self, tag, title, notes, sha=None):
         if not sha:
             if not self.path:
-                raise StudyError(self.source, "нужен --sha или запуск из каталога репозитория")
-            sha = local.tag_sha(self.path, tag)
+                raise ToolError(self.source, "нужен --sha или запуск из каталога репозитория")
+            sha = git.tag_sha(self.path, tag)
         out = self.api(f"/repos/{self.repo}/releases",
                        json_body={"tag_name": tag, "target_commitish": sha, "name": title,
                                   "body": notes, "draft": False, "prerelease": False})
@@ -95,7 +107,7 @@ class GitVerse(Hosting):
     def update(self, tag, title=None, notes=None):
         ids = {r["tag"]: r["id"] for r in self.releases()}
         if tag not in ids:
-            raise StudyError(self.source, f"релиза {tag} нет")
+            raise ToolError(self.source, f"релиза {tag} нет")
         body = compact((("name", title), ("body", notes)))
         self.api(f"/repos/{self.repo}/releases/{ids[tag]}", method="PATCH", json_body=body)
         return {"id": ids[tag], "tag": tag, "url": self.web_url(tag)}
@@ -105,7 +117,6 @@ class GitVerse(Hosting):
 
 
 class SourceCraft(Hosting):
-    key = "sc"
     source = "sourcecraft"
     token_key = "SOURCECRAFT_TOKEN"
     repo_key = "SC_REPO"
@@ -117,11 +128,16 @@ class SourceCraft(Hosting):
     def releases(self):
         out = self.api(f"/repos/{self.repo}/releases", retries=net.RETRIES) or {}
         return [{"tag": r.get("tag"), "id": r.get("id"), "name": r.get("title"),
-                 "status": r.get("status"), "assets": len(r.get("assets") or []),
+                 "status": r.get("status"),
+                 "assets": [a["name"] for a in r.get("assets") or [] if "attachment" in a],
                  "url": self.web_url(r.get("tag"))} for r in out.get("releases", [])]
 
+    @staticmethod
+    def target(release):
+        return release["tag"]
+
     def localize(self, notes):
-        gv = self.path and local.repo_from_remote(self.path, GitVerse.remote, GitVerse.host)
+        gv = self.path and git.repo_from_remote(self.path, GitVerse.remote, GitVerse.host)
         if gv:
             notes = notes.replace(f"{GitVerse.web}/{gv}", self.repo_url())
         return notes
@@ -147,4 +163,4 @@ class SourceCraft(Hosting):
         return f"{self.repo_url()}/releases/{tag}"
 
 
-HOSTS = {cls.key: cls for cls in (GitVerse, SourceCraft)}
+HOSTS = {cls.source: cls for cls in (GitVerse, SourceCraft)}

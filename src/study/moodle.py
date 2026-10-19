@@ -1,7 +1,7 @@
 import re
 
-from . import net
-from .config import StudyError
+from kit import net
+from kit.config import ToolError
 from .fmt import plain
 
 PAGE = 50
@@ -31,8 +31,8 @@ class Moodle:
         out = net.request(f"{self.base}/webservice/rest/server.php", "moodle", form=form,
                           where=fn, retries=0 if fn in WRITE else net.RETRIES)
         if isinstance(out, dict) and out.get("exception"):
-            raise StudyError("moodle", out.get("message", "ошибка"),
-                             code=out.get("errorcode"), where=fn)
+            raise ToolError("moodle", out.get("message", "ошибка"),
+                            code=out.get("errorcode"), where=fn)
         return out
 
     def me(self):
@@ -64,7 +64,7 @@ class Moodle:
         try:
             out = self.call("mod_forum_get_forum_discussions", forumid=forumid, page=0,
                             perpage=perpage)
-        except StudyError as e:
+        except ToolError as e:
             if e.code != "invalidrecord":
                 raise
             out = self.call("mod_forum_get_forum_discussions_paginated", forumid=forumid,
@@ -135,7 +135,7 @@ class Moodle:
                               files=[("file_1", path.name, data, "application/octet-stream")],
                               timeout=900, where="upload.php")
             if isinstance(out, dict) and out.get("error"):
-                raise StudyError("moodle", out["error"], where="upload.php")
+                raise ToolError("moodle", out["error"], where="upload.php")
             last = out[0]["itemid"]
         return last
 
@@ -158,9 +158,9 @@ class Moodle:
 
 def warned(out, fn):
     if isinstance(out, list) and out:
-        raise StudyError("moodle", "; ".join(plain(w.get("item")) or w.get("message", "")
-                                             for w in out),
-                         code=out[0].get("warningcode"), where=fn)
+        raise ToolError("moodle", "; ".join(plain(w.get("item")) or w.get("message", "")
+                                            for w in out),
+                        code=out[0].get("warningcode"), where=fn)
     return out
 
 

@@ -9,7 +9,7 @@ import time
 import unittest
 from unittest import mock
 
-from study import agent, courses, files, local, setup
+from study import agent, courses, files, setup
 from study.config import Config
 from tests.fakes import NOW, FakeNet, at_root, fixture, home, patch, tmpdir
 
@@ -26,7 +26,7 @@ class SetupCase(unittest.TestCase):
         (self.here / "study").write_text("#!/usr/bin/env python3\n", encoding="utf-8")
         (self.here / "docs" / "AGENTS.md").write_text("# Инструкция\n", encoding="utf-8")
         (self.here / "config.env.example").write_text("# пример\nTUIS_TOKEN=\n", encoding="utf-8")
-        at_root(self, self.root, setup, agent, courses, files, local)
+        at_root(self, self.root, setup, agent, courses, files)
         patch(self, setup, "HERE", self.here)
         patch(self, agent, "SOURCE", self.here / "docs" / "AGENTS.md")
         patch(self, time, "time", lambda: NOW)
@@ -65,8 +65,7 @@ class SetupCase(unittest.TestCase):
 class SetupTest(SetupCase):
     def test_tokens_saved_and_skipped(self):
         cfg = self.config()
-        self.answers = ["n", "", "", "nettech", "", "", "r", "", "", "n"]
-        (self.root / "nettech" / "course" / ".git").mkdir(parents=True)
+        self.answers = ["n", "", "", "nettech", "s", "", "s", "", "", "n"]
         self.secrets = ["a" * 32, "", ""]
         self.moodle_ok()
         log, text, out = self.run_setup(cfg)
@@ -88,15 +87,14 @@ class SetupTest(SetupCase):
         self.assertIn("  + Токены: Moodle: сохранён в config.env\n", text)
         self.assertIn("  ! Токены: GitVerse: пропущен", text)
         self.assertIn("\n  Дальше\n  study state --pull", text)
-        self.assertIn(f"рабочая папка {self.root},\n  в Instructions - текст из "
-                      f"{self.here / 'docs' / 'daily-digest-prompt.md'}", text)
+        self.assertIn(f"рабочая папка {self.root},\n  в Instructions - ссылка на скилл "
+                      f"{self.root / '.claude' / 'skills' / 'study-digest' / 'SKILL.md'}", text)
         self.assertTrue((self.root / "nettech" / "stash").is_dir())
         self.assertFalse((self.root / "2" / "tuis").exists())
         self.assertEqual(Config(cfg.path).codes(), {1: "nettech", 2: "2", 4: "4"})
-        self.assertEqual(Config(cfg.path).flows(), {1: "release", 2: "release", 4: "file"})
-        self.assertIn("    сдача, release|file [release]: ", self.prompts)
-        self.assertIn("    сдача, release|file [file]: ", self.prompts)
-        self.assertIn("Сдача: релиз репозитория со скринкастами",
+        self.assertEqual(Config(cfg.path).flows(), {1: "screencast", 2: "screencast", 4: "direct"})
+        self.assertIn("    сдача, screencast|direct [direct]: ", self.prompts)
+        self.assertIn("Сдача: лаба под запись: репозиторий, релиз, скринкасты",
                       (self.root / "2" / "NOTES.md").read_text(encoding="utf-8"))
         self.assertFalse((self.root / "CLAUDE.md").exists())
         self.assertIn("позже: study files --pull", out)
@@ -162,8 +160,7 @@ class SetupTest(SetupCase):
 
     def test_operators_dirs_and_pull(self):
         (self.root / "CLAUDE.md").write_text("# Моё\n", encoding="utf-8")
-        (self.root / "nettech" / "course" / ".git").mkdir(parents=True)
-        cfg = self.config("TUIS_TOKEN=t\nCODE 1 nettech\n")
+        cfg = self.config("TUIS_TOKEN=t\nCODE 1 nettech\nFLOW 1 screencast\n")
         (self.here / ".state.json").write_text(
             json.dumps({"last_run": 1, "courses": {"1": "Сетевые технологии"}}), encoding="utf-8")
         self.answers = ["claude codex", "s", "", "", "", "", "", "y"]
@@ -183,7 +180,9 @@ class SetupTest(SetupCase):
         notes = (self.root / "nettech" / "NOTES.md").read_text(encoding="utf-8")
         self.assertTrue(notes.startswith("# Сетевые технологии — заметки\n"))
         self.assertIn("Курс в ТУИС: `1`", notes)
-        self.assertIn("Сдача: релиз репозитория со скринкастами", notes)
+        self.assertIn("Сдача: лаба под запись: репозиторий, релиз, скринкасты "
+                      "(скилл lab-release-with-screencasts)", notes)
+        self.assertEqual(Config(cfg.path).flows(), {1: "screencast", 2: "direct"})
         self.assertIn(["ok", "Оператор", "поставлено: claude codex"], log)
         claude = (self.root / "CLAUDE.md").read_text(encoding="utf-8")
         self.assertTrue(claude.startswith("# Моё\n\n" + agent.BEGIN))
@@ -276,7 +275,8 @@ class LinkTest(unittest.TestCase):
         home(self, self.tmp)
         self.here = self.tmp / "study" / ".digest"
         self.here.mkdir(parents=True)
-        (self.here / "study").write_text("", encoding="utf-8")
+        for name in setup.COMMANDS:
+            (self.here / name).write_text("", encoding="utf-8")
         patch(self, setup, "HERE", self.here)
         self.bin = self.tmp / ".local" / "bin"
 
@@ -284,14 +284,18 @@ class LinkTest(unittest.TestCase):
     def test_symlink(self):
         self.bin.mkdir(parents=True)
         (self.bin / "study").write_text("old", encoding="utf-8")
-        self.assertEqual(setup.link_command(), f"~/.local/bin/study -> {self.here / 'study'}")
+        self.assertEqual(setup.link_command("study"),
+                         f"~/.local/bin/study -> {self.here / 'study'}")
         self.assertEqual(os.readlink(self.bin / "study"), str(self.here / "study"))
-        setup.link_command()
+        setup.link_command("study")
         self.assertTrue((self.bin / "study").is_symlink())
+        self.assertEqual(setup.link_command("labrelease"),
+                         f"~/.local/bin/labrelease -> {self.here / 'labrelease'}")
 
     @unittest.skipUnless(os.name == "nt", "study.cmd")
     def test_cmd_and_sh(self):
-        self.assertTrue(setup.link_command().endswith(f"study.cmd -> {self.here / 'study'}"))
+        self.assertTrue(setup.link_command("study")
+                        .endswith(f"study.cmd -> {self.here / 'study'}"))
         cmd = (self.bin / "study.cmd").read_bytes().decode("oem")
         self.assertTrue(cmd.startswith('@"') and cmd.endswith(' %*\r\n'))
         self.assertIn('"%USERPROFILE%\\study\\.digest\\study"', cmd)
@@ -342,11 +346,11 @@ class NotesStubTest(unittest.TestCase):
     def test_stub_once(self):
         root = tmpdir(self)
         at_root(self, root, courses)
-        p = courses.scaffold("nettech", 1, "Сетевые технологии", "release")
+        p = courses.scaffold("nettech", 1, "Сетевые технологии", "direct")
         self.assertEqual(p, root / "nettech" / "NOTES.md")
         text = p.read_text(encoding="utf-8")
         self.assertIn("# Сетевые технологии — заметки\n\nКурс в ТУИС: `1` «Сетевые технологии». "
-                      "Сдача: релиз репозитория со скринкастами (`study answer`).", text)
+                      "Сдача: ответ прямо в ТУИС: текст и/или файлы (скилл study-lab).", text)
         self.assertIn("`study files nettech --pull`", text)
         for head in ("## Задания и сроки", "## Ключевые находки", "## Лабы"):
             self.assertIn(head, text)

@@ -1,7 +1,8 @@
 import unittest
 
 from study import assigns
-from study.config import Course, StudyError, soft
+from kit.config import ToolError, soft
+from study.config import Course
 from tests.fakes import MoodleCase, fixture
 
 
@@ -61,7 +62,7 @@ class RegistryTest(MoodleCase):
 
     def test_find_says_what_is_wrong(self):
         r = self.both()
-        with self.assertRaises(StudyError) as e:
+        with self.assertRaises(ToolError) as e:
             r.find(self.course, "77")
         self.assertIn("в курсе nettech нет задания «77»", str(e.exception))
 
@@ -74,7 +75,7 @@ class RegistryTest(MoodleCase):
         r = assigns.Registry(self.m, [2])
         course = Course(2, "num-methods", "Вычислительные методы")
         self.assertEqual(r.works(course), [])
-        with self.assertRaises(StudyError) as e:
+        with self.assertRaises(ToolError) as e:
             r.find(course, "1")
         self.assertIn("в курсе num-methods заданий нет", str(e.exception))
 
@@ -82,7 +83,7 @@ class RegistryTest(MoodleCase):
         self.net.reply("POST", ("mod_assign_get_assignments", "courseids[0]=1"),
                        fixture("assignments"))
         self.net.reply("POST", ("core_course_get_contents", "courseid=1"),
-                       StudyError("moodle", "HTTP 502"))
+                       ToolError("moodle", "HTTP 502"))
         errors = []
         r = assigns.Registry(self.m, [self.course.id],
                              soft=lambda where: soft(errors, where))

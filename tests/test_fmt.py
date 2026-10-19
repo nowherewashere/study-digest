@@ -1,5 +1,6 @@
 import unittest
 
+from kit.cli import table
 from study import fmt
 
 
@@ -57,8 +58,8 @@ class TablesTest(unittest.TestCase):
                          "| x | yy |\n| --- | --- |\n| a | 1 |")
 
     def test_table(self):
-        self.assertEqual(fmt.table([]), "")
-        self.assertEqual(fmt.table([["a", "bbb"], ["cc", "d"]], ["1", "2"]),
+        self.assertEqual(table([]), "")
+        self.assertEqual(table([["a", "bbb"], ["cc", "d"]], ["1", "2"]),
                          "1   2\n--  ---\na   bbb\ncc  d")
 
 

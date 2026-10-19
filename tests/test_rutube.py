@@ -5,9 +5,9 @@ import os
 import time
 import unittest
 
-from study import cli
-from study.config import StudyError
-from study.rutube import ACCESS_MARGIN, BASE, REFRESH_URL, UPLOAD_URL, Rutube, _extract_refresh
+from rutube import cli
+from kit.config import ToolError
+from rutube.client import ACCESS_MARGIN, BASE, REFRESH_URL, UPLOAD_URL, Rutube, _extract_refresh
 from tests.fakes import FakeNet, config, tmpdir
 
 
@@ -38,7 +38,7 @@ class RutubeCase(unittest.TestCase):
 
 class AuthTest(RutubeCase):
     def test_auto_prefers_jwt_then_token(self):
-        with self.assertRaises(StudyError) as e:
+        with self.assertRaises(ToolError) as e:
             self.rt()._auth_header()
         self.assertEqual(e.exception.code, "notoken")
         self.token.write_text("T0\n", encoding="utf-8")
@@ -48,7 +48,7 @@ class AuthTest(RutubeCase):
         self.assertEqual(self.rt()._auth_header(), {"Authorization": "Bearer " + FRESH})
         self.assertEqual(self.rt("token")._auth_header(), {"Authorization": "Token T0"})
         self.assertEqual(self.rt("jwt")._auth_header(), {"Authorization": "Bearer " + FRESH})
-        with self.assertRaises(StudyError) as e:
+        with self.assertRaises(ToolError) as e:
             self.rt("bogus")._auth_header()
         self.assertEqual(e.exception.code, "config")
         self.assertEqual(self.net.sent, [])
@@ -76,18 +76,18 @@ class AuthTest(RutubeCase):
         self.assertEqual(self.refresh.read_text(encoding="utf-8"), "R1\n")
         self.access.unlink()
         self.net.reply("POST", REFRESH_URL, {"detail": "invalid"})
-        with self.assertRaises(StudyError) as e:
+        with self.assertRaises(ToolError) as e:
             self.rt("jwt")._mint()
         self.assertEqual(e.exception.code, "auth")
         self.refresh.unlink()
-        with self.assertRaises(StudyError) as e:
+        with self.assertRaises(ToolError) as e:
             self.rt("jwt")._mint()
         self.assertEqual(e.exception.code, "notoken")
 
     def test_save_refresh_checks_before_writing(self):
         self.refresh.write_text("OLD\n", encoding="utf-8")
         self.net.reply("POST", REFRESH_URL, {"error": "x"})
-        with self.assertRaises(StudyError):
+        with self.assertRaises(ToolError):
             self.rt().save_refresh("refreshToken=BAD; ym_uid=1")
         self.assertEqual(self.refresh.read_text(encoding="utf-8"), "OLD\n")
         self.net.reply("POST", REFRESH_URL, {"access_token": FRESH, "refresh_token": "R2"})
@@ -97,7 +97,7 @@ class AuthTest(RutubeCase):
         self.assertEqual((self.refresh.read_text(encoding="utf-8"),
                           self.access.read_text(encoding="utf-8")), ("R2\n", FRESH + "\n"))
         self.assertEqual(_extract_refresh(" R9 "), "R9")
-        with self.assertRaises(StudyError):
+        with self.assertRaises(ToolError):
             self.rt().save_refresh("refreshToken=")
 
     def test_login_token_mode(self):
@@ -108,7 +108,7 @@ class AuthTest(RutubeCase):
         self.assertNotIn("Authorization", self.net.sent[0]["headers"])
         self.assertEqual(self.token.read_text(encoding="utf-8"), "T1\n")
         self.net.reply("POST", "/accounts/token_auth/", {"non_field_errors": ["bad"]})
-        with self.assertRaises(StudyError):
+        with self.assertRaises(ToolError):
             self.rt().login("a@b.c", "pw")
 
     def test_channel_id(self):
@@ -119,7 +119,7 @@ class AuthTest(RutubeCase):
                                    data={"user_info": {"id": 7}}) + "\n", encoding="utf-8")
         self.assertEqual(self.rt("jwt")._channel_id(), 7)
         self.access.write_text(jwt(exp=int(time.time()) + 3600) + "\n", encoding="utf-8")
-        with self.assertRaises(StudyError) as e:
+        with self.assertRaises(ToolError) as e:
             self.rt("jwt")._channel_id()
         self.assertEqual(e.exception.code, "auth")
         self.assertEqual(Rutube._jwt_payload("not-a-jwt"), {})
@@ -150,7 +150,7 @@ class ApiTest(RutubeCase):
         self.assertEqual(self.net.sent[0]["json_body"],
                          {"title": "Новое", "category": 13, "is_hidden": False,
                           "age_restriction": 4})
-        with self.assertRaises(StudyError) as e:
+        with self.assertRaises(ToolError) as e:
             self.r.edit("v1", title=None)
         self.assertEqual(e.exception.code, "usage")
 
@@ -199,15 +199,39 @@ class ApiTest(RutubeCase):
         self.net.reply("PATCH", "/v2/video/v7/", {})
         self.net.reply("POST", UPLOAD_URL + "S1", b"", headers={"Upload-Offset": "5"})
         self.net.reply("POST", "/playlist/custom/update/v7/",
-                       StudyError("rutube", "HTTP 404: non-existent items"))
+                       ToolError("rutube", "HTTP 404: non-existent items"))
         args = argparse.Namespace(file=str(f), url=None, title=None, desc=None, category=None,
-                                  age=None, hidden=False, playlist="55", slot="lab",
+                                  age=None, hidden=False, playlist="55", slot="lab", env=None,
                                   confirm=True, mode="auto")
-        v, text = cli.cmd_rt_upload(self.cfg, args)
+        v, text = cli.cmd_upload(self.cfg, args)
         self.assertEqual((v["id"], v["playlist_error"]), ("v7", "HTTP 404: non-existent items"))
         self.assertIn("загружено: v7 https://rutube.ru/video/v7/", text)
         self.assertIn("RUTUBE_LAB=https://rutube.ru/video/v7/", text)
-        self.assertIn("study rt playlist add 55 v7", text)
+        self.assertIn("rutube playlist add 55 v7", text)
+
+    def test_upload_writes_env(self):
+        f = self.tmp / "lab06.mkv"
+        f.write_bytes(b"MOVIE")
+        env = self.tmp / "lab06.env"
+        env.write_text("# ссылки\nRUTUBE_PLAYLIST=p\nRUTUBE_LAB=\n", encoding="utf-8")
+        args = argparse.Namespace(file=str(f), url=None, title="ЛР 6", desc=None, category=None,
+                                  age=None, hidden=False, playlist=None, slot="lab",
+                                  env=str(env), confirm=False, mode="auto")
+        plan, text, rc = cli.cmd_upload(self.cfg, args)
+        self.assertEqual((rc, plan["env"]), (1, str(env)))
+        self.assertIn(f"ссылка: RUTUBE_LAB в {env}", text)
+        self.net.reply("POST", "/uploader/upload_session/", {"sid": "S1", "video": "v7"})
+        self.net.reply("PATCH", "/v2/video/v7/", {})
+        self.net.reply("POST", UPLOAD_URL + "S1", b"", headers={"Upload-Offset": "5"})
+        args.confirm = True
+        _, text = cli.cmd_upload(self.cfg, args)
+        self.assertIn(f"RUTUBE_LAB записан в {env}", text)
+        self.assertEqual(env.read_text(encoding="utf-8"),
+                         "# ссылки\nRUTUBE_PLAYLIST=p\nRUTUBE_LAB=https://rutube.ru/video/v7/\n")
+        args.slot = None
+        with self.assertRaises(ToolError) as e:
+            cli.cmd_upload(self.cfg, args)
+        self.assertEqual(e.exception.code, "usage")
 
     def test_upload_url(self):
         self.net.reply("POST", BASE + "/video/", {"video_id": "v9"})
@@ -220,7 +244,7 @@ class ApiTest(RutubeCase):
         self.assertEqual(self.net.sent[1]["json_body"],
                          {"title": "ЛР 1", "is_hidden": True, "age_restriction": 1})
         self.net.reply("POST", "/video/", {"detail": "quota"})
-        with self.assertRaises(StudyError) as e:
+        with self.assertRaises(ToolError) as e:
             self.r.upload_url("https://example.org/b.mp4")
         self.assertEqual(e.exception.code, "upload")
 
@@ -249,12 +273,12 @@ class ApiTest(RutubeCase):
         f = self.tmp / "a.mp4"
         f.write_bytes(b"MOVIE")
         self.net.reply("POST", "/uploader/upload_session/", {"sid": "S1"})
-        with self.assertRaises(StudyError) as e:
+        with self.assertRaises(ToolError) as e:
             self.r.upload_file(f)
         self.assertIn("upload_session", e.exception.message)
         self.net.reply("POST", "/uploader/upload_session/", {"sid": "S2", "video": "v8"})
         self.net.reply("PATCH", "/v2/video/v8/", {})
         self.net.reply("POST", UPLOAD_URL + "S2", b"", headers={"Upload-Offset": "3"})
-        with self.assertRaises(StudyError) as e:
+        with self.assertRaises(ToolError) as e:
             self.r.upload_file(f)
         self.assertEqual(e.exception.message, "загружено 3 из 5 байт")

@@ -4,7 +4,7 @@ import pathlib
 import re
 import sys
 
-from .config import ROOT, StudyError
+from kit.config import ROOT, ToolError
 from .fmt import moment
 from .snapshot import load_state
 
@@ -20,8 +20,8 @@ def present(into, name):
 
 def stash(course):
     if not course.code:
-        raise StudyError("config", f"у курса {course.id} нет папки (строки CODE в config.env), "
-                                   "забирать файлы некуда")
+        raise ToolError("config", f"у курса {course.id} нет папки (строки CODE в config.env), "
+                                  "забирать файлы некуда")
     return ROOT / course.code / "stash"
 
 
@@ -144,7 +144,7 @@ def pull(moodle, data, force=False, progress=None):
         dest = pathlib.Path(f["path"])
         try:
             body = moodle.download(f["url"])
-        except StudyError as e:
+        except ToolError as e:
             errors.append({**e.as_dict(), "where": f["name"]})
             continue
         dest.parent.mkdir(parents=True, exist_ok=True)

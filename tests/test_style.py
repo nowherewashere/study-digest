@@ -28,11 +28,14 @@ def calls(path):
     return out
 
 
+def sources():
+    launchers = ("study", "gitverse", "sourcecraft", "rutube", "labrelease", "install.py")
+    return [*HERE.glob("src/*/*.py"), *HERE.glob("tests/*.py"), *(HERE / n for n in launchers)]
+
+
 class EncodingTest(unittest.TestCase):
     def test_every_text_io_names_encoding(self):
-        files = [*HERE.glob("src/study/*.py"), *HERE.glob("tests/*.py"), HERE / "study",
-                 HERE / "install.py"]
-        bad = [f"{f.relative_to(HERE)}:{line}" for f in files if f.exists()
+        bad = [f"{f.relative_to(HERE)}:{line}" for f in sources() if f.exists()
                for line, args in calls(f) if "encoding" not in args]
         self.assertEqual(bad, [])
 
@@ -40,8 +43,7 @@ class EncodingTest(unittest.TestCase):
 class NoCommentsTest(unittest.TestCase):
     def test_no_comments_or_docstrings(self):
         bad = []
-        for f in [*HERE.glob("src/study/*.py"), *HERE.glob("tests/*.py"), HERE / "study",
-                  HERE / "install.py"]:
+        for f in sources():
             if not f.exists():
                 continue
             name = f.relative_to(HERE)

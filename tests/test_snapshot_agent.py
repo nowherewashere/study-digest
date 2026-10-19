@@ -1,9 +1,10 @@
 import json
-import time
 import unittest
 
 from study import agent, snapshot, update
-from study.config import Config, StudyError
+from study.fmt import msk
+from kit.config import ToolError
+from study.config import Config
 from tests.fakes import at_root, patch, tmpdir
 
 
@@ -23,9 +24,9 @@ class SnapshotTest(unittest.TestCase):
         self.assertEqual(snapshot.load_state(self.cfg, "3")["last_run"], 1_700_000_000)
         self.assertEqual(snapshot.load_state(self.cfg, "2023-11-15")["last_run"], 1_700_000_000)
         early = snapshot.load_state(self.cfg, "2020-01-01")
-        self.assertEqual(time.strftime("%Y-%m-%d", time.localtime(early["last_run"])), "2020-01-01")
+        self.assertEqual(msk(early["last_run"]).strftime("%Y-%m-%d"), "2020-01-01")
         self.assertEqual(early["grades"], {"1": {}})
-        with self.assertRaises(StudyError):
+        with self.assertRaises(ToolError):
             snapshot.load_state(self.cfg, "вчера")
 
     def test_broken_state_falls_back_to_history(self):
@@ -38,13 +39,13 @@ class SnapshotTest(unittest.TestCase):
         snapshot.save_state(self.cfg, {"last_run": 1_700_000_000, "grades": {"1": {}}})
         snapshot.save_state(self.cfg, {"last_run": 1_700_000_000 + snapshot.DAY, "grades": {}})
         current.write_text("", encoding="utf-8")
-        day = time.strftime("%Y-%m-%d", time.localtime(1_700_000_000 + snapshot.DAY))
+        day = msk(1_700_000_000 + snapshot.DAY).strftime("%Y-%m-%d")
         (snapshot.history_dir(self.cfg) / f"{day}.json").write_text("{", encoding="utf-8")
         errors = []
         state = snapshot.load_state(self.cfg, errors=errors)
         self.assertEqual(state["last_run"], 1_700_000_000)
         self.assertEqual(errors[0]["message"], ".state.json повреждён, взят снимок за "
-                         + time.strftime("%Y-%m-%d", time.localtime(1_700_000_000)))
+                         + msk(1_700_000_000).strftime("%Y-%m-%d"))
         self.assertEqual(snapshot.load_state(self.cfg), state)
         self.assertEqual(snapshot.load_state(self.cfg, day)["last_run"], 1_700_000_000)
         snapshot.save_state(self.cfg, state)

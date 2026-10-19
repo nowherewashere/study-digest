@@ -1,10 +1,12 @@
+import io
 import json
 import unittest
+import zipfile
 from unittest import mock
 
-from study import local
-from study.config import StudyError
-from study.hosting import HOSTS, GitVerse, SourceCraft
+from kit import git as kitgit
+from kit.config import ToolError
+from hosting.client import HOSTS, GitVerse, SourceCraft
 from tests.fakes import FakeNet, config, patch, tmpdir
 
 SHA = "0123456789abcdef0123456789abcdef01234567"
@@ -20,7 +22,7 @@ class HostingCase(unittest.TestCase):
         self.net = FakeNet().install(self)
         self.cfg = config(self.tmp, "GV_REPO=cfg/gv\nSC_REPO=cfg/sc\n")
         self.gits = []
-        patch(self, local, "git", self.git)
+        patch(self, kitgit, "git", self.git)
         self.notes = self.tmp / "notes.md"
         self.notes.write_text("см. https://gitverse.ru/me/course/commit/abc\n", encoding="utf-8")
 
@@ -29,7 +31,7 @@ class HostingCase(unittest.TestCase):
         self.assertEqual((path, timeout), (self.tmp, None))
         out = REMOTES.get(args, "")
         if check and not out:
-            raise StudyError("git", "ошибка", where=" ".join(args))
+            raise ToolError("git", "ошибка", where=" ".join(args))
         return out
 
 
@@ -45,11 +47,10 @@ class RepoChoiceTest(HostingCase):
         with mock.patch.dict(REMOTES, {("remote", "get-url", "origin"):
                                        "git@github.com:me/course.git"}):
             self.assertEqual(GitVerse(self.cfg, path=self.tmp).repo, "cfg/gv")
-        with self.assertRaises(StudyError) as e:
+        with self.assertRaises(ToolError) as e:
             GitVerse(config(self.tmp))
         self.assertIn("GV_REPO", e.exception.message)
-        self.assertEqual(HOSTS["gv"], GitVerse)
-        self.assertEqual(HOSTS["sc"], SourceCraft)
+        self.assertEqual(HOSTS, {"gitverse": GitVerse, "sourcecraft": SourceCraft})
 
 
 class GitVerseTest(HostingCase):
@@ -59,7 +60,8 @@ class GitVerseTest(HostingCase):
 
     def test_headers_and_releases(self):
         self.net.reply("GET", "/repos/me/course/releases",
-                       [{"id": 7, "tag_name": "v1.1.0", "name": "ЛР 1", "assets": [{"id": 1}]},
+                       [{"id": 7, "tag_name": "v1.1.0", "name": "ЛР 1",
+                         "assets": [{"id": 1, "name": "a.pdf"}]},
                         {"id": 3, "tag_name": "v1.0.0", "name": None, "assets": None}])
         rows = self.gv.releases()
         req = self.net.sent[0]
@@ -67,9 +69,10 @@ class GitVerseTest(HostingCase):
         self.assertEqual(req["headers"],
                          {"Authorization": "Bearer gv-token",
                           "Accept": "application/vnd.gitverse.object+json;version=1"})
-        self.assertEqual(rows, [{"tag": "v1.1.0", "id": 7, "name": "ЛР 1", "assets": 1,
+        self.assertEqual(GitVerse.target(rows[0]), 7)
+        self.assertEqual(rows, [{"tag": "v1.1.0", "id": 7, "name": "ЛР 1", "assets": ["a.pdf"],
                                  "url": "https://gitverse.ru/me/course/releases/tag/v1.1.0"},
-                                {"tag": "v1.0.0", "id": 3, "name": None, "assets": 0,
+                                {"tag": "v1.0.0", "id": 3, "name": None, "assets": [],
                                  "url": "https://gitverse.ru/me/course/releases/tag/v1.0.0"}])
         self.net.reply("GET", "/releases", None)
         self.assertEqual(self.gv.releases(), [])
@@ -94,7 +97,7 @@ class GitVerseTest(HostingCase):
         self.gv.release("v2", "t", "n", sha="f" * 40)
         self.assertEqual(self.net.sent[0]["json_body"]["target_commitish"], "f" * 40)
         self.assertNotIn(("rev-parse", "v2^{commit}"), self.gits)
-        with self.assertRaises(StudyError) as e:
+        with self.assertRaises(ToolError) as e:
             GitVerse(self.cfg, repo="a/b").release("v2", "t", "n")
         self.assertIn("--sha", e.exception.message)
 
@@ -105,7 +108,7 @@ class GitVerseTest(HostingCase):
         self.assertEqual(out["id"], 7)
         self.assertEqual(self.net.sent[1]["json_body"], {"body": "новое описание"})
         self.net.reply("GET", "/releases", [])
-        with self.assertRaises(StudyError) as e:
+        with self.assertRaises(ToolError) as e:
             self.gv.update("v9", title="x")
         self.assertEqual(e.exception.message, "релиза v9 нет")
 
@@ -120,15 +123,26 @@ class GitVerseTest(HostingCase):
         self.assertEqual(req["files"],
                          {"attachment": ("report.pdf", b"%PDF-1.4", "application/pdf")})
         self.assertEqual((req["fields"], req["timeout"]), ({}, 900))
-        for bad in ("slides.html", "report.qmd"):
-            with self.assertRaises(StudyError) as e:
-                self.gv.asset(7, f, name=bad)
-            self.assertIn("не принимает .qmd и .html", e.exception.message)
         self.assertEqual(len(self.net.sent), 1)
 
+    def test_asset_converts_qmd_and_html(self):
+        qmd = self.tmp / "lab01-report.qmd"
+        qmd.write_text("# Отчёт\n", encoding="utf-8")
+        html = self.tmp / "lab01-slides.html"
+        html.write_text("<html>", encoding="utf-8")
+        self.net.reply("POST", "/releases/7/assets?name=lab01-report.md", {})
+        self.net.reply("POST", "/releases/7/assets?name=lab01-slides-html.zip", {})
+        self.assertEqual(self.gv.asset(7, qmd)["name"], "lab01-report.md")
+        self.assertEqual(self.gv.asset(7, html)["name"], "lab01-slides-html.zip")
+        md, zipped = (r["files"]["attachment"] for r in self.net.sent)
+        self.assertEqual(md[:2], ("lab01-report.md", "# Отчёт\n".encode()))
+        self.assertEqual((zipped[0], zipped[2]), ("lab01-slides-html.zip", "application/zip"))
+        with zipfile.ZipFile(io.BytesIO(zipped[1])) as z:
+            self.assertEqual(z.read("lab01-slides.html"), b"<html>")
+
     def test_api_error(self):
-        self.net.reply("GET", "/x", StudyError("gitverse", "HTTP 400 (пустой ответ)", where="/x"))
-        with self.assertRaises(StudyError):
+        self.net.reply("GET", "/x", ToolError("gitverse", "HTTP 400 (пустой ответ)", where="/x"))
+        with self.assertRaises(ToolError):
             self.gv.api("/x")
 
 
@@ -141,14 +155,18 @@ class SourceCraftTest(HostingCase):
         self.net.reply("GET", "/repos/org/course/releases",
                        {"releases": [{"id": "r1", "tag": "v1.1.0", "title": "ЛР 1",
                                       "status": "PUBLISHED",
-                                      "assets": [{"name": "a"}, {"name": "b"}]}]})
+                                      "assets": [{"name": "a", "attachment": {"id": "1"}},
+                                                 {"name": "b", "attachment": {"id": "2"}},
+                                                 {"name": "Source code (zip)",
+                                                  "archive_link": {"link": "x"}}]}]})
         rows = self.sc.releases()
         req = self.net.sent[0]
         self.assertEqual(req["url"], "https://api.sourcecraft.tech/repos/org/course/releases")
         self.assertEqual(req["headers"], {"Authorization": "Bearer sc-token"})
         self.assertEqual(rows, [{"tag": "v1.1.0", "id": "r1", "name": "ЛР 1",
-                                 "status": "PUBLISHED", "assets": 2,
+                                 "status": "PUBLISHED", "assets": ["a", "b"],
                                  "url": "https://sourcecraft.dev/org/course/releases/v1.1.0"}])
+        self.assertEqual(SourceCraft.target(rows[0]), "v1.1.0")
         self.net.reply("GET", "/releases", {})
         self.assertEqual(self.sc.releases(), [])
 

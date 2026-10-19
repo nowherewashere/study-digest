@@ -4,10 +4,14 @@ import unittest
 import urllib.error
 import urllib.request
 
-from study import local, net
+from hosting.client import GitVerse, SourceCraft
+from kit import net
+from kit.config import ToolError
+from kit.git import repo_slug
+from labrelease import lab
 from study.cli import kv
-from study.config import Config, StudyError
-from study.hosting import GitVerse, SourceCraft
+from study.config import Config
+from study.fmt import lab_id
 from tests.fakes import patch
 
 
@@ -15,18 +19,19 @@ class LocalTest(unittest.TestCase):
     def test_repo_slug(self):
         for url in ("ssh://git@gitverse.ru:2222/owner/repo.git", "ssh://ssh.sourcecraft.dev/owner/repo.git",
                     "git@github.com:owner/repo.git", "https://github.com/owner/repo", ""):
-            self.assertEqual(local.repo_slug(url), "owner/repo" if url else "")
+            self.assertEqual(repo_slug(url), "owner/repo" if url else "")
 
     def test_lab_id(self):
-        self.assertEqual(local.lab_id("1"), "01")
-        self.assertEqual(local.lab_id(" LAB02 "), "02")
-        for bad in ("hw1", "123", "x", ""):
-            with self.assertRaises(StudyError):
-                local.lab_id(bad)
+        for parse in (lab_id, lab.lab_id):
+            self.assertEqual(parse("1"), "01")
+            self.assertEqual(parse(" LAB02 "), "02")
+            for bad in ("hw1", "123", "x", ""):
+                with self.assertRaises(ToolError):
+                    parse(bad)
 
     def test_video_keys(self):
-        self.assertEqual(local.VIDEO_KEYS[:2], ["RUTUBE_PLAYLIST", "RUTUBE_LAB"])
-        self.assertEqual(len(local.VIDEO_KEYS), 10)
+        self.assertEqual(lab.VIDEO_KEYS[:2], ["RUTUBE_PLAYLIST", "RUTUBE_LAB"])
+        self.assertEqual(len(lab.VIDEO_KEYS), 10)
 
 
 class NetTest(unittest.TestCase):
@@ -38,12 +43,12 @@ class NetTest(unittest.TestCase):
 
         cert = ssl.SSLCertVerificationError(1, "CERTIFICATE_VERIFY_FAILED")
         patch(self, urllib.request, "urlopen", fail(cert))
-        with self.assertRaises(StudyError) as e:
+        with self.assertRaises(ToolError) as e:
             net.send("https://x.example/", "moodle")
         self.assertEqual(e.exception.code, "certificate")
         self.assertIn("Install Certificates.command", e.exception.hint())
         patch(self, urllib.request, "urlopen", fail(OSError("refused")))
-        with self.assertRaises(StudyError) as e:
+        with self.assertRaises(ToolError) as e:
             net.send("https://x.example/", "moodle")
         self.assertEqual((e.exception.code, e.exception.hint()), (None, None))
         self.assertIn("нет связи", e.exception.message)
@@ -83,12 +88,12 @@ class NetTest(unittest.TestCase):
         for bad, tries in ((http(502), 3), (http(400), 1), (cert, 1)):
             naps.clear()
             patch(self, urllib.request, "urlopen", fails(bad, bad, bad, None))
-            with self.assertRaises(StudyError) as e:
+            with self.assertRaises(ToolError) as e:
                 net.send("https://x.example/", "moodle", retries=2)
             self.assertEqual(len(naps), tries - 1, bad)
         self.assertEqual(e.exception.code, "certificate")
         patch(self, urllib.request, "urlopen", fails(http(503), None))
-        with self.assertRaises(StudyError) as e:
+        with self.assertRaises(ToolError) as e:
             net.send("https://x.example/", "moodle")
         self.assertIn("HTTP 503", e.exception.message)
 

@@ -1,13 +1,13 @@
 import json
-import os
 import time
 import unittest
 
+from kit.config import ToolError
 from study import config as studyconfig
-from study import digest, files, local, update
-from study.config import Course, StudyError
+from study import digest, files, update
+from study.config import Course
 from study.moodle import Moodle
-from tests.fakes import DAY, NOW, FakeNet, at_root, config, fixture, patch, repo, tmpdir
+from tests.fakes import DAY, NOW, FakeNet, at_root, config, fixture, patch, tmpdir
 
 DUE = {-5: 1789160340, -3: 1789333140, -2: 1789419540, 1: 1789678740, 3: 1789851540,
        8: 1790283540, 10: 1790456340}
@@ -63,25 +63,12 @@ def names(items):
     return [a["short"] for a in items]
 
 
+def rendered(tuis):
+    return digest.render({"now": tuis["now"], "days": tuis["days"], "tuis": tuis,
+                          "errors": tuis["errors"]})
+
+
 class DigestCase(unittest.TestCase):
-
-    @classmethod
-    def setUpClass(cls):
-        cls._tz = os.environ.get("TZ")
-        os.environ["TZ"] = "MSK-3"
-        if hasattr(time, "tzset"):
-            time.tzset()
-        elif time.strftime("%H:%M", time.localtime(NOW)) != "09:00":
-            raise unittest.SkipTest("нужен TZ=MSK-3 в окружении")
-
-    @classmethod
-    def tearDownClass(cls):
-        if cls._tz is None:
-            del os.environ["TZ"]
-        else:
-            os.environ["TZ"] = cls._tz
-        if hasattr(time, "tzset"):
-            time.tzset()
 
     def setUp(self):
         self.tmp = tmpdir(self)
@@ -135,7 +122,7 @@ class CollectorTest(DigestCase):
         d = digest.Collector(self.cfg, Moodle(self.cfg), 21, STATE).run()
         pick = next(a for a in d["deadlines"] if a.get("modname") == "choice")
         self.assertEqual((pick["choice"]["chosen"], pick["submission"]), ("Тема Б", "submitted"))
-        self.assertNotIn("Тема доклада", digest.render_digest(d))
+        self.assertNotIn("Тема доклада", rendered(d))
 
     def test_retakes(self):
         _, d = self.collect()
@@ -183,7 +170,7 @@ class CollectorTest(DigestCase):
         q = next(x for x in d["quizzes"] if x["quiz_id"] == 8)
         self.assertEqual(q["opens"]["ts"], NOW + DAY)
         self.assertIn("| Итоговый тест | Вычислительные методы | откроется 17.09 09:00; 0 из ∞ |",
-                      digest.render_digest(d))
+                      rendered(d))
 
     def test_quizzes_updates_notifications(self):
         _, d = self.collect()
@@ -259,7 +246,7 @@ class CollectorTest(DigestCase):
         self.assertEqual((errors, d["updates"][0]["pulled"]), ([], ["task-2.pdf"]))
         self.assertEqual((self.tmp / "nettech/stash/task-2.pdf").read_bytes(), b"%PDF-old")
         self.assertIn("| nettech | Лабораторные работы | Задание 2: новые файлы | task-2.pdf |",
-                      digest.render_digest(d))
+                      rendered(d))
 
         d = day(v2, NOW)
         self.assertEqual(d["updates"], [])
@@ -284,7 +271,7 @@ class CollectorTest(DigestCase):
                          ("reopened", "4.00000", "Переделать раздел 3: нет схемы сети.", True))
         self.assertIn("ЛР 1 — Vagrant и Packer", names(d["not_started"]))
         self.assertEqual([a["assign_id"] for a in d["feedback"]], [11])
-        text = digest.render_digest(d)
+        text = rendered(d)
         self.assertIn("| ЛР 1 — Vagrant и Packer | nettech | на доработку: Переделать раздел 3: "
                       "нет схемы сети. |", text)
         self.assertIn("\n## Отзывы\n", text)
@@ -315,7 +302,7 @@ class CollectorTest(DigestCase):
                           ("Студент Тестов", "Добавил, проверьте.")])
         self.assertEqual([c["id"] for c in lab["comments_new"]], [801])
         self.assertEqual([a["assign_id"] for a in d["comments"]], [11])
-        text = digest.render_digest(d)
+        text = rendered(d)
         self.assertIn("\n## Комментарии к ответам\n", text)
         self.assertIn("| nettech | ЛР 1 — Vagrant и Packer | Иван Петров | Добавьте схему сети. |",
                       text)
@@ -324,7 +311,7 @@ class CollectorTest(DigestCase):
 
         d, _ = run({**STATE, "comments": {"11": [801, 802]}})
         self.assertEqual(d["comments"], [])
-        self.assertNotIn("Комментарии к ответам", digest.render_digest(d))
+        self.assertNotIn("Комментарии к ответам", rendered(d))
         d, _ = run(STATE)
         self.assertEqual(d["comments"], [])
         d, snap = run({**STATE, "comments": {"11": [801]}}, "comments_thread")
@@ -349,7 +336,7 @@ class CollectorTest(DigestCase):
         _, d = self.collect(state={**STATE, "announcements": {"1": [501], "2": []}})
         self.assertEqual([a["id"] for a in d["announcements"]], [500])
         self.assertIn("| 13.09 09:00 | nettech | **Консультация перед ЛР 3** · Иванов Иван: "
-                      "В четверг в 18:00. |", digest.render_digest(d))
+                      "В четверг в 18:00. |", rendered(d))
 
     def test_announcements_fallback_and_soft_error(self):
         queue(self.net)
@@ -385,12 +372,12 @@ class CollectorTest(DigestCase):
         self.assertEqual(by["ДЗ 1 — Кодирование"]["submission"], "offline")
         self.assertIn("ДЗ 1 — Кодирование", names(d["overdue"]))
         self.assertNotIn("ДЗ 1 — Кодирование", names(d["not_started"]))
-        self.assertIn("| **очно / без ответа в ТУИС** |", digest.render_digest(d))
+        self.assertIn("| **очно / без ответа в ТУИС** |", rendered(d))
         _, d, by = run(11, {"locked": True, "canedit": False})
         self.assertTrue(by["ЛР 1 — Vagrant и Packer"]["closed"])
         self.assertNotIn("ЛР 1 — Vagrant и Packer", names(d["not_started"]))
         self.assertIn("| ЛР 1 — Vagrant и Packer | nettech | заблокировано |",
-                      digest.render_digest(d))
+                      rendered(d))
         snap, d, by = run(13, {"canedit": True, "extensionduedate": NOW + DAY})
         hw = by["ДЗ 1 — Кодирование"]
         self.assertEqual((hw["due"]["ts"], hw["closed"]), (NOW + DAY, False))
@@ -467,7 +454,7 @@ class CollectorTest(DigestCase):
         self.assertEqual(d["new_courses"],
                          [{"id": 2, "code": None, "title": "Вычислительные методы"}])
         self.assertIn("\nНовый курс в ТУИС: Вычислительные методы (id 2) — строка `CODE 2 <папка>` "
-                      "или `COURSE_IGNORE` в config.env.", digest.render_digest(d))
+                      "или `COURSE_IGNORE` в config.env.", rendered(d))
 
     def test_hidden_assign_comes_from_contents(self):
         _, d = self.collect()
@@ -478,14 +465,14 @@ class CollectorTest(DigestCase):
 
     def test_course_without_code_is_reminded(self):
         _, d = self.collect()
-        text = digest.render_digest(d)
+        text = rendered(d)
         self.assertEqual(d["new_courses"], [])
         self.assertIn("\nБез папки (файлы не скачиваются): Вычислительные методы (id 2) — "
                       "строка `CODE <id> <папка>` или `COURSE_IGNORE` в config.env.", text)
 
     def test_new_course_is_not_named_twice(self):
         _, d = self.collect(state={**STATE, "courses": {"1": "Сетевые технологии"}})
-        text = digest.render_digest(d)
+        text = rendered(d)
         self.assertIn("Новый курс в ТУИС: Вычислительные методы (id 2)", text)
         self.assertNotIn("Без папки", text)
 
@@ -496,7 +483,7 @@ class CollectorTest(DigestCase):
                          ([], [], [], []))
         self.assertFalse(any(i["new"] for g in d["grades"] for i in g["items"]))
         self.assertEqual([n["id"] for n in d["notifications"]], [902, 903])
-        text = digest.render_digest(d)
+        text = rendered(d)
         self.assertIn("Первый запуск", text)
         self.assertNotIn("Новое в курсах", text)
 
@@ -511,12 +498,12 @@ class CollectorTest(DigestCase):
         self.assertEqual(d["grades"], [])
         self.assertEqual([(e["code"], e["where"]) for e in d["errors"]],
                          [("invalidrecord", "оценки, курс 1")])
-        self.assertTrue(digest.render_digest(d).endswith(
+        self.assertTrue(rendered(d).endswith(
             "\nНе удалось: moodle · оценки, курс 1 · no."))
 
     def test_render_golden(self):
         _, d = self.collect()
-        self.assertEqual(digest.render_digest(d), fixture("digest.md").rstrip("\n"))
+        self.assertEqual(rendered(d), fixture("digest.md").rstrip("\n"))
 
     def test_collect_saves_snapshot(self):
         queue(self.net, since=False)
@@ -545,68 +532,16 @@ class StateTest(DigestCase):
 
     def setUp(self):
         super().setUp()
-        at_root(self, self.tmp, local, files, studyconfig)
-        patch(self, update, "check", lambda: None)
-        self.repo = repo(self.tmp / "nettech" / "course",
-                         {"origin": "ssh://git@gitverse.ru:2222/me/nettech.git",
-                          "src": "ssh://ssh.sourcecraft.dev/me/nettech.git"}, tag="v1.1.0")
-        (self.repo / "labs/lab01/report/_output").mkdir(parents=True)
-        (self.repo / "labs/lab01/report/_output/r.pdf").write_bytes(b"%PDF")
-        (self.repo / "labs/lab01/report/r.qmd").write_text("", encoding="utf-8")
-        (self.repo / "labs/lab03").mkdir()
-        (self.repo / "labs/lab03/todo.txt").write_text("", encoding="utf-8")
-
-    def hosts(self):
-        self.net.reply("GET", "api.gitverse.ru/repos/me/nettech/releases",
-                       [{"id": 1, "tag_name": "v1.0.0", "name": "lab00",
-                         "assets": [{"id": 9, "name": "r.pdf"}]}])
-        self.net.reply("GET", "api.sourcecraft.tech/repos/me/nettech/releases",
-                       {"releases": [{"id": "b", "tag": "v1.1.0", "title": "lab01",
-                                      "status": "PUBLISHED", "assets": []},
-                                     {"id": "a", "tag": "v1.0.0", "title": "lab00",
-                                      "status": "PUBLISHED", "assets": [{"name": "r.pdf"}]}]})
-
-    def test_local_only(self):
-        self.hosts()
-        d = digest.state(self.cfg, None, with_tuis=False)
-        self.assertIsNone(d["tuis"])
-        c = d["courses"][0]
-        self.assertEqual((c["dir"], c["flow"]), (str(self.tmp / "nettech"), "release"))
-        self.assertEqual((c["code"], c["repo"]["branch"], c["repo"]["last_tag"],
-                          c["repo"]["dirty"]), ("nettech", "master", "v1.1.0", ["?? labs/"]))
-        self.assertEqual(c["repo"]["remotes"],
-                         {"gitverse": "me/nettech", "sourcecraft": "me/nettech"})
-        self.assertEqual(c["unreleased_tags"], [{"hosting": "gitverse", "tags": ["v1.1.0"]}])
-        self.assertEqual((c["releases"]["sourcecraft"]["latest"]["tag"],
-                          c["releases"]["gitverse"]["latest"]["assets"]), ("v1.1.0", 1))
-        self.assertEqual([(lab["num"], lab["tuis"], lab["report"]["built"], lab["ready"]["videos"])
-                          for lab in c["labs"]],
-                         [("01", None, True, False), ("03", None, False, False)])
-        text = digest.render(d)
-        self.assertIn("ТУИС не опрашивался", text)
-        self.assertIn("nettech: незакоммичено 1, нет релиза на gitverse (v1.1.0), "
-                      "релиз v1.1.0 на sourcecraft без файлов.", text)
-
-    def test_file_flow_skips_repo_and_hostings(self):
-        cfg = config(self.tmp, "COURSE_IGNORE=4\nCODE 1 nettech\nFLOW 1 file\n")
-        d = digest.state(cfg, None, with_tuis=False)
-        c = d["courses"][0]
-        self.assertEqual((c["flow"], c["repo"], c["releases"], c["labs"]), ("file", None, {}, []))
-        self.assertEqual(d["errors"], [])
-        self.assertNotIn("nettech:", digest.render(d))
+        at_root(self, self.tmp, files, studyconfig)
+        patch(self, update, "check", lambda: {"behind": 0, "agents": []})
 
     def test_with_tuis_and_pull(self):
         self.cfg.state_file().write_text(json.dumps(STATE), encoding="utf-8")
         queue(self.net)
-        self.hosts()
         self.net.reply("GET", "002-dns.pdf?forcedownload=1&token=test-token", b"%PDF-2")
         d = digest.state(self.cfg, Moodle(self.cfg), save=False, pull=True)
-        labs = {lab["num"]: lab for lab in d["courses"][0]["labs"]}
-        self.assertEqual((labs["01"]["tuis"]["assign_id"], labs["01"]["tuis"]["matched_by"]),
-                         (11, "number"))
-        self.assertEqual(labs["03"]["tuis"]["submission"], "new")
-        self.assertEqual(labs["01"]["ready"], {"report": True, "presentation": False,
-                                                "videos": False, "submitted": False})
+        self.assertEqual(sorted(d), ["days", "errors", "now", "schema", "tuis", "update"])
+        self.assertEqual((d["schema"], d["update"]), (2, {"behind": 0, "agents": []}))
         self.assertEqual((self.tmp / "nettech/stash/002-dns.pdf").read_bytes(), b"%PDF-2")
         pulled = {u["item"]: u.get("pulled") for u in d["tuis"]["updates"]}
         self.assertEqual(pulled, {"Методичка 2": ["002-dns.pdf"], "Материалы": [],
@@ -618,9 +553,14 @@ class StateTest(DigestCase):
         self.assertIn("video.mp4, big.zip — не скачаны; ссылка → https://example.org/", text)
         self.assertIn("lecture-01.pdf — у курса нет папки", text)
 
-    def test_hosting_error_is_soft(self):
-        self.net.reply("GET", "api.gitverse.ru", StudyError("gitverse", "HTTP 401: bad token"))
-        self.net.reply("GET", "api.sourcecraft.tech", {"releases": []})
-        d = digest.state(self.cfg, None, with_tuis=False)
-        self.assertEqual(d["courses"][0]["releases"]["gitverse"], {"ok": False, "latest": None})
-        self.assertEqual([e["where"] for e in d["errors"]], ["gitverse, курс nettech"])
+    def test_update_error_is_soft(self):
+        self.cfg.state_file().write_text(json.dumps(STATE), encoding="utf-8")
+        queue(self.net)
+        patch(self, update, "check", lambda: (_ for _ in ()).throw(
+            ToolError("git", "fetch не удался: нет сети", where="update")))
+        d = digest.state(self.cfg, Moodle(self.cfg), save=False)
+        self.assertIsNone(d["update"])
+        self.assertEqual([e["where"] for e in d["errors"]], ["обновление study"])
+        self.assertIn("Не удалось: git · обновление study", digest.render(d))
+
+

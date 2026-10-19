@@ -3,8 +3,15 @@ import html as htmllib
 import re
 import time
 
+from kit.config import ToolError
+
 HOUR = 3600
 DAY = 24 * HOUR
+MSK = datetime.timezone(datetime.timedelta(hours=3), "MSK")
+
+
+def msk(ts):
+    return datetime.datetime.fromtimestamp(int(ts), MSK)
 
 
 def left(sec):
@@ -21,7 +28,7 @@ WEEKDAYS = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
 
 
 def weekday(ts):
-    return WEEKDAYS[time.localtime(ts).tm_wday]
+    return WEEKDAYS[msk(ts).weekday()]
 
 
 def moment(ts, now=None):
@@ -32,10 +39,9 @@ def moment(ts, now=None):
     delta = ts - now
     return {
         "ts": ts,
-        "iso": datetime.datetime.fromtimestamp(ts, datetime.timezone.utc)
-                       .astimezone().isoformat(timespec="seconds"),
-        "text": time.strftime("%d.%m %H:%M", time.localtime(ts)),
-        "full": time.strftime("%d.%m.%Y %H:%M", time.localtime(ts)),
+        "iso": msk(ts).isoformat(timespec="seconds"),
+        "text": msk(ts).strftime("%d.%m %H:%M"),
+        "full": msk(ts).strftime("%d.%m.%Y %H:%M"),
         "left": left(delta),
         "left_sec": delta,
         "overdue": delta < 0,
@@ -71,6 +77,13 @@ def parse_name(name):
     return None
 
 
+def lab_id(num):
+    m = re.fullmatch(r"(?:lab)?(\d{1,2})", str(num).strip().lower())
+    if not m:
+        raise ToolError("study", f"ожидается номер работы (NN), а не «{num}»")
+    return m.group(1).zfill(2)
+
+
 def lab_number(name, work="lab"):
     p = parse_name(name)
     return p["num"].zfill(2) if p and p["work"] == work else None
@@ -88,20 +101,6 @@ def md_table(rows, headers):
         return "| " + " | ".join(str(c) for c in r) + " |"
     return "\n".join([line(headers), line("-" * max(len(h), 3) for h in headers)] +
                      [line(r) for r in rows])
-
-
-def table(rows, headers=None):
-    rows = [[str(c) for c in r] for r in rows]
-    if not rows:
-        return ""
-    data = ([list(headers)] if headers else []) + rows
-    widths = [max(len(r[i]) for r in data) for i in range(len(data[0]))]
-    out = []
-    for i, r in enumerate(data):
-        out.append("  ".join(c.ljust(w) for c, w in zip(r, widths)).rstrip())
-        if headers and i == 0:
-            out.append("  ".join("-" * w for w in widths))
-    return "\n".join(out)
 
 
 def failures(errors):

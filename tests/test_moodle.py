@@ -1,8 +1,9 @@
 import argparse
 import unittest
 
-from study import cli, fmt, net
-from study.config import StudyError
+from kit import net
+from kit.config import ToolError
+from study import cli, fmt
 from study.moodle import (PAGE, accepts, accepts_line, check_state, check_submission,
                           comment_rows, grade_of, submission_state)
 from tests.fakes import FakeNet, MoodleCase, config, fixture, tmpdir
@@ -37,7 +38,7 @@ class MoodleTest(MoodleCase):
         self.net.reply("POST", "core_webservice_get_site_info",
                        {"exception": "moodle_exception", "errorcode": "invalidtoken",
                         "message": "Invalid token - token not found"})
-        with self.assertRaises(StudyError) as e:
+        with self.assertRaises(ToolError) as e:
             self.m.me()
         err = e.exception
         self.assertEqual((err.source, err.code, err.where),
@@ -144,7 +145,7 @@ class MoodleTest(MoodleCase):
         self.assertEqual(first["timeout"], 900)
         self.net.reply("POST", "/webservice/upload.php", {"error": "File is too large",
                                                           "errorcode": "maxbytes"})
-        with self.assertRaises(StudyError) as e:
+        with self.assertRaises(ToolError) as e:
             self.m.upload([a], itemid=77)
         self.assertEqual(e.exception.message, "File is too large")
 
@@ -237,7 +238,7 @@ class AssignsTest(unittest.TestCase):
         net_.reply("POST", ("mod_assign_get_assignments", "courseids[0]=1"),
                    fixture("assignments"))
         net_.reply("POST", ("core_course_get_contents", "courseid=1"),
-                   StudyError("moodle", "HTTP 502"))
+                   ToolError("moodle", "HTTP 502"))
         data, text = cli.cmd_assigns(config(tmp, "CODE 1 nettech\n"),
                                      argparse.Namespace(course="nettech"))
         self.assertIn("id=11 cmid=111", text)
@@ -406,7 +407,7 @@ class SubmitTest(MoodleCase):
                        [{"item": "The due date for this assignment has now passed", "itemid": 11,
                          "warningcode": "couldnotsavesubmission",
                          "message": "Could not save submission."}])
-        with self.assertRaises(StudyError) as e:
+        with self.assertRaises(ToolError) as e:
             self.submit(attach=[str(self.pdf)], confirm=True)
         self.assertEqual((e.exception.code, e.exception.where),
                          ("couldnotsavesubmission", "mod_assign_save_submission"))

@@ -1,8 +1,9 @@
 import time
 
-from . import files, hosting, local, snapshot, update
+from . import files, snapshot, update
 from .assigns import KINDS, SUBMISSION, Registry
-from .config import Course, StudyError, soft
+from kit.config import ToolError, soft
+from .config import Course
 from .fmt import failures, md_table, moment, plain, short_name, weekday
 from .moodle import PENDING, comment_rows, submission_state
 from .snapshot import load_state, save_state
@@ -347,7 +348,7 @@ class Collector:
             with self.soft(f"оценки, курс {cid}"):
                 try:
                     report = self.moodle.grades(cid)
-                except StudyError as e:
+                except ToolError as e:
                     if e.code == "nopermissiontoviewgrades":
                         continue
                     raise
@@ -468,22 +469,6 @@ def when(m):
     return m["text"] if m else "—"
 
 
-def repo_trouble(c):
-    repo = c["repo"]
-    if not repo:
-        return None
-    bad = []
-    if repo["dirty"]:
-        bad.append(f"незакоммичено {len(repo['dirty'])}")
-    for u in c["unreleased_tags"]:
-        bad.append(f"нет релиза на {u['hosting']} ({', '.join(u['tags'])})")
-    for name, r in c["releases"].items():
-        latest = r.get("latest")
-        if latest and not latest.get("assets"):
-            bad.append(f"релиз {latest['tag']} на {name} без файлов")
-    return f"{c['code']}: {', '.join(bad)}" if bad else None
-
-
 def news_rows(t):
     rows = []
     for u in t.get("updates", []):
@@ -575,15 +560,9 @@ def render(d):
     if rows:
         out += ["\n## Сроки\n",
                 md_table(rows, ["Когда", "Осталось", "Работа", "Курс", "Состояние"])]
-    elif d.get("tuis") is None:
-        out.append("\nТУИС не опрашивался (`--local`): только состояние репозиториев.")
     else:
         tail = "" if news or t.get("first_run") or t.get("new_courses") else " Обновлений нет."
         out.append(f"\nСроков в ближайшие {d['days']} дн нет.{tail}")
-
-    trouble = [s for s in map(repo_trouble, d["courses"]) if s]
-    if trouble:
-        out.append("\n" + "; ".join(trouble) + ".")
 
     named = {c["id"] for c in t.get("new_courses", [])}
     unset = [c for c in t.get("courses", []) if not c["code"] and c["id"] not in named]
@@ -621,12 +600,6 @@ def render(d):
     return "\n".join(out)
 
 
-def render_digest(d):
-    return render({"now": d["now"], "days": d["days"], "tuis": d, "courses": [],
-                   "errors": d["errors"]})
-
-
-
 def pull_updates(cfg, moodle, tuis, errors):
     pulled = {}
     for c in tuis["courses"]:
@@ -647,64 +620,13 @@ def pull_updates(cfg, moodle, tuis, errors):
         if u["files"] and u["course"]["id"] in pulled else u for u in tuis["updates"]]}
 
 
-def host_state(cfg, repo, cls, tags, course, errors):
-    slug = local.repo_from_remote(repo, cls.remote, cls.host)
-    release, missing = {"ok": False, "latest": None}, []
-    with soft(errors, f"{cls.source}, курс {course.code}"):
-        rels = cls(cfg, path=repo).releases()
-        names = [r["tag"] for r in rels]
-        release = {"ok": True, "latest": rels[0] if rels else None, "tags": names}
-        missing = [t for t in tags if t not in names]
-    return slug or None, release, missing
-
-
-def lab_state(lab, found):
-    return {**lab,
-            "tuis": ({"assign_id": found["assign_id"], "name": found["name"],
-                      "due": found["due"], "submission": found["submission"],
-                      "matched_by": "number"} if found else None),
-            "ready": {"report": lab["report"]["built"],
-                      "presentation": lab["presentation"]["built"],
-                      "videos": lab["videos"]["filled"] == lab["videos"]["total"],
-                      "submitted": bool(found and found["submission"] == "submitted")}}
-
-
-def course_state(cfg, course, by_lab, errors):
-    flow = local.flow_of(cfg, course.code)
-    head = {**course.as_dict(), "dir": str(course.dir), "flow": flow}
-    repo = local.course_repo(course.code) if flow == "release" else None
-    if not repo:
-        return {**head, "repo": None, "releases": {}, "unreleased_tags": [], "labs": []}
-    info = local.repo_state(repo)
-    hosts = {cls.source: host_state(cfg, repo, cls, info["tags"], course, errors)
-             for cls in hosting.HOSTS.values()}
-    return {**head, "repo": {**info, "remotes": {s: h[0] for s, h in hosts.items()}},
-            "releases": {s: h[1] for s, h in hosts.items()},
-            "unreleased_tags": [{"hosting": s, "tags": h[2]} for s, h in hosts.items() if h[2]],
-            "labs": [lab_state(lab, by_lab.get((course.code, lab["num"])))
-                     for lab in local.labs(repo, course.code)]}
-
-
-def state(cfg, moodle, days=None, with_tuis=True, save=True, pull=False, since=None):
+def state(cfg, moodle, days=None, save=True, pull=False, since=None):
     errors = []
-    tuis = None
-    if with_tuis:
-        tuis = collect(cfg, moodle, days=days, save=save, since=since)
-        if pull:
-            tuis = pull_updates(cfg, moodle, tuis, errors)
-
-    t = tuis or {}
-    by_lab = {(a["course"]["code"], a["lab"]): a
-              for a in t.get("deadlines", []) + t.get("overdue", []) + t.get("submitted", [])
-              if a.get("lab") and a["course"].get("code")}
-    titles = {c["id"]: c["title"] for c in t.get("courses", [])}
-    courses = [course_state(cfg, Course(cid, code, titles.get(cid, "")), by_lab, errors)
-               for cid, code in cfg.codes().items()]
-
+    tuis = collect(cfg, moodle, days=days, save=save, since=since)
+    if pull:
+        tuis = pull_updates(cfg, moodle, tuis, errors)
     upd = None
     with soft(errors, "обновление study"):
         upd = update.check()
-
-    return {"schema": 1, "now": moment(int(time.time())), "days": days or cfg.days(),
-            "tuis": tuis, "courses": courses, "update": upd,
-            "errors": errors + t.get("errors", [])}
+    return {"schema": 2, "now": moment(int(time.time())), "days": days or cfg.days(),
+            "tuis": tuis, "update": upd, "errors": errors + tuis.get("errors", [])}

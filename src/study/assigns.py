@@ -3,9 +3,9 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from . import moodle as moodle_api
-from .config import Course, StudyError
-from .fmt import lab_number, moment, parse_name, plain, short_name
-from .local import lab_id
+from kit.config import ToolError
+from .config import Course
+from .fmt import lab_id, lab_number, moment, parse_name, plain, short_name
 
 DATE_IDS = {"duedate", "timeclose"}
 OPEN_IDS = {"allowsubmissionsfromdate", "timeopen"}
@@ -178,11 +178,11 @@ class Registry:
         works = self.works(course)
         label = course.code or str(course.id)
         if not works:
-            raise StudyError("moodle", f"в курсе {label} заданий нет: "
-                                       "ТУИС по этому курсу ничего не принимает")
+            raise ToolError("moodle", f"в курсе {label} заданий нет: "
+                                      "ТУИС по этому курсу ничего не принимает")
         what = what.strip().lower()
         keys = []
-        with contextlib.suppress(StudyError):
+        with contextlib.suppress(ToolError):
             num = lab_id(what)
             keys += [lambda w: w.lab == num, lambda w: w.num == num]
         if what.isdigit():
@@ -190,5 +190,5 @@ class Registry:
         found = next((w for key in keys for w in works if key(w)), None)
         if found:
             return found
-        raise StudyError("moodle", f"в курсе {label} нет задания «{what}»: "
-                                   f"study assigns --course {label}")
+        raise ToolError("moodle", f"в курсе {label} нет задания «{what}»: "
+                                  f"study assigns --course {label}")

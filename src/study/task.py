@@ -1,23 +1,24 @@
 import re
 import time
 
-from . import local
+from kit.config import ROOT, soft
+
 from .assigns import SUBMISSION, Registry
-from .config import ROOT, soft
+from .config import SKILLS
 from .fmt import failures, moment, plain
 from .moodle import PENDING, accepts, accepts_line, comment_rows, submission_state
 
+DELIVERABLES = (".docx", ".pdf", ".odt", ".xlsx", ".zip")
 
-def on_disk(cfg, code, num, flow):
-    if not code or not num:
+
+def on_disk(code, num, flow):
+    if not code or not num or flow != "direct":
         return None
-    if flow == "release":
-        repo = local.course_repo(code)
-        lab = next((x for x in local.labs(repo, code) if x["num"] == num), None) if repo else None
-        return {"kind": "release", **lab} if lab else None
     d = ROOT / code / f"lab{num}"
-    return {"kind": "file", "path": str(d), "exists": d.is_dir(),
-            "pdfs": [str(p) for p in sorted(d.glob("**/_output/*.pdf"))] if d.is_dir() else []}
+    found = sorted(p for p in d.rglob("*") if p.suffix in DELIVERABLES and p.is_file()) \
+        if d.is_dir() else []
+    return {"path": str(d), "exists": d.is_dir(),
+            "files": [str(p.relative_to(d)) for p in found]}
 
 
 def in_stash(code, num):
@@ -33,13 +34,13 @@ def build(cfg, moodle, course, what):
     errors = []
     reg = Registry(moodle, [course.id], soft=lambda where: soft(errors, where))
     w = reg.find(course, what)
-    flow = local.flow_of(cfg, course.code) if course.code else None
+    flow = cfg.flows().get(course.id)
     d = {"course": {"id": course.id, "code": course.code,
                     "title": reg.title(course.id) or course.title},
          "assign_id": w.assign_id, "cmid": w.cmid, "name": w.name, "short": w.short,
          "num": w.lab, "source": w.source, "available": w.available, "reason": w.reason,
-         "section": w.section, "flow": flow,
-         "local": on_disk(cfg, course.code, w.lab, flow), "stash": in_stash(course.code, w.lab),
+         "section": w.section, "flow": flow, "skill": SKILLS.get(flow),
+         "local": on_disk(course.code, w.lab, flow), "stash": in_stash(course.code, w.lab),
          "warnings": errors}
     if not w.available:
         return dict(d, due=moment(w.due), opens=moment(w.opens), closed=True, locked=False,
@@ -74,20 +75,16 @@ def build(cfg, moodle, course, what):
                            "text": c["text"]} for c in comments])
 
 
-def disk_line(d):
+def flow_line(d):
+    if not d["flow"]:
+        return "Сдача: не задана (FLOW в config.env, `study courses --setup`)"
+    line = f"Сдача: {d['flow']} → скилл {d['skill']}"
     x = d["local"]
     if x is None:
-        return None
-    if x["kind"] == "file":
-        return "Локально (file): {} — {}".format(
-            x["path"], ("есть, PDF: " + ", ".join(x["pdfs"]) if x["pdfs"] else "есть, PDF нет")
-            if x["exists"] else "нет")
-    yes = {True: "есть", False: "нет"}
-    return ("Локально (release): {} — отчёт pdf {}, презентация {}, видео {}/{}, "
-            "заготовка ответа {}".format(x["path"], yes[x["report"]["built"]],
-                                         yes[x["presentation"]["built"]], x["videos"]["filled"],
-                                         x["videos"]["total"], yes[x["answer_draft"]])
-            + ("; вложения: " + ", ".join(x["attachments"]) if x["attachments"] else ""))
+        return line
+    if not x["exists"]:
+        return f"{line}; {x['path']} — нет"
+    return f"{line}; {x['path']} — " + (", ".join(x["files"]) if x["files"] else "файлов сдачи нет")
 
 
 def state_line(d):
@@ -119,8 +116,7 @@ def render(d):
         out.append("Отзыв: " + d["feedback"])
     for c in d["comments"]:
         out.append("Комментарий · {} · {}: {}".format(c["author"], c["time"]["full"], c["text"]))
-    if disk_line(d):
-        out.append(disk_line(d))
+    out.append(flow_line(d))
     if d["stash"]:
         out.append("В stash (возможно по теме): " + ", ".join(d["stash"]))
     for f in d["attachments"]:

@@ -1,5 +1,8 @@
-from . import agent, local
-from .config import HERE, StudyError
+from kit.cli import version as describe
+from kit.config import HERE, ToolError
+from kit.git import git, run
+
+from . import agent
 
 FETCH_TIMEOUT = 20
 FETCH_TRIES = 2
@@ -7,26 +10,26 @@ VERIFY_TIMEOUT = 10
 
 
 def version(ref="HEAD"):
-    return local.git(HERE, "describe", "--tags", "--always", ref) or "?"
+    return describe(ref, HERE)
 
 
 def check(fetch=True):
-    if not (HERE / ".git").exists() or not local.git(HERE, "rev-parse", "--verify", "-q", "@{u}"):
+    if not (HERE / ".git").exists() or not git(HERE, "rev-parse", "--verify", "-q", "@{u}"):
         return None
     if fetch:
         for _ in range(FETCH_TRIES):
-            r = local.run(HERE, "fetch", "--quiet", "--tags", timeout=FETCH_TIMEOUT)
+            r = run(HERE, "fetch", "--quiet", "--tags", timeout=FETCH_TIMEOUT)
             if r is not None:
                 break
         if r is None or r.returncode:
             why = (r.stderr.strip() if r
                    else f"нет ответа за {FETCH_TIMEOUT} с, {FETCH_TRIES} попытки")
-            raise StudyError("git", f"fetch не удался: {why}", where="update")
-    commits = local.git(HERE, "log", "--format=%s", "HEAD..@{u}").splitlines()
-    stat = local.git(HERE, "diff", "--stat", "HEAD..@{u}") if commits else ""
-    verified = local.run(HERE, "verify-commit", "@{u}", timeout=VERIFY_TIMEOUT) if commits else None
+            raise ToolError("git", f"fetch не удался: {why}", where="update")
+    commits = git(HERE, "log", "--format=%s", "HEAD..@{u}").splitlines()
+    stat = git(HERE, "diff", "--stat", "HEAD..@{u}") if commits else ""
+    verified = run(HERE, "verify-commit", "@{u}", timeout=VERIFY_TIMEOUT) if commits else None
     return {"version": version(), "remote": version("@{u}"), "behind": len(commits),
-            "ahead": int(local.git(HERE, "rev-list", "--count", "@{u}..HEAD") or 0),
+            "ahead": int(git(HERE, "rev-list", "--count", "@{u}..HEAD") or 0),
             "commits": commits, "stat": stat,
             "signed": None if verified is None else verified.returncode == 0,
             "agents": [s for s in map(agent.status, agent.OPERATORS) if s["installed"]]}
@@ -44,10 +47,10 @@ def plan(d):
 def apply(before=None):
     before = before or check()
     if before is None:
-        raise StudyError("git", f"{HERE} — не git-клон с upstream, обновлять нечего",
-                         where="update")
+        raise ToolError("git", f"{HERE} — не git-клон с upstream, обновлять нечего",
+                        where="update")
     if before["behind"]:
-        local.git(HERE, "pull", "--ff-only", "--quiet", check=True, timeout=60)
+        git(HERE, "pull", "--ff-only", "--quiet", check=True, timeout=60)
     refreshed = [agent.install(s["operator"])["file"] for s in before["agents"]
                  if before["behind"] or not s["current"]]
     return {**before, "updated": bool(before["behind"]), "now": version(), "refreshed": refreshed}

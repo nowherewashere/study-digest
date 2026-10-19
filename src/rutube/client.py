@@ -5,8 +5,8 @@ import pathlib
 import time
 import uuid
 
-from . import net
-from .config import StudyError, write_atomic
+from kit import net
+from kit.config import ToolError, write_atomic
 
 BASE = "https://rutube.ru/api"
 REFRESH_URL = "https://rutube.ru/multipass/api/v3/accounts/token/"
@@ -67,7 +67,7 @@ class Rutube:
                                where="token_auth"))
         token = out.get("token")
         if not token:
-            raise StudyError(self.source, f"токен не получен: {out}", code="auth")
+            raise ToolError(self.source, f"токен не получен: {out}", code="auth")
         _save(self._token_file, token)
         return {"token_file": str(self._token_file), "ok": True}
 
@@ -76,7 +76,7 @@ class Rutube:
             refresh = getpass.getpass("Rutube refreshToken (или строка cookie): ")
         refresh = _extract_refresh(refresh)
         if not refresh:
-            raise StudyError(self.source, "не нашёл refreshToken", code="auth")
+            raise ToolError(self.source, "не нашёл refreshToken", code="auth")
         access, new = self._refresh_call(refresh)
         _save(self._refresh_file, new or refresh)
         _save(self._access_file, access)
@@ -89,7 +89,7 @@ class Rutube:
                                where="token/refresh"))
         access = out.get("access_token")
         if not access:
-            raise StudyError(self.source, f"refresh не удался: {out}", code="auth")
+            raise ToolError(self.source, f"refresh не удался: {out}", code="auth")
         return access, out.get("refresh_token")
 
     def _mint(self):
@@ -103,7 +103,7 @@ class Rutube:
                 return cached
         rf = self._refresh_file
         if not rf.exists():
-            raise StudyError(self.source, f"нет файла {rf}", code="notoken")
+            raise ToolError(self.source, f"нет файла {rf}", code="notoken")
         refresh = rf.read_text(encoding="utf-8").strip()
         access, new = self._refresh_call(refresh)
         if new and new != refresh:
@@ -120,13 +120,13 @@ class Rutube:
             elif self._token_file.exists():
                 mode = "token"
             else:
-                raise StudyError(self.source, f"нет ни {self._refresh_file}, ни "
-                                 f"{self._token_file} — см. rt login или rt jwt", code="notoken")
+                raise ToolError(self.source, f"нет ни {self._refresh_file}, ни {self._token_file}"
+                                             " — см. rutube login или rutube jwt", code="notoken")
         if mode == "jwt":
             return {"Authorization": "Bearer " + self._mint()}
         if mode == "token":
             return {"Authorization": "Token " + self.cfg.token("RUTUBE_TOKEN")}
-        raise StudyError(self.source, f"неизвестный режим {mode}", code="config")
+        raise ToolError(self.source, f"неизвестный режим {mode}", code="config")
 
     def api(self, path, auth=True, **kw):
         head = self._auth_header() if auth else {}
@@ -171,14 +171,14 @@ class Rutube:
         if age is not None:
             body["age_restriction"] = AGE.get(int(age), int(age))
         if not body:
-            raise StudyError(self.source, "нечего менять", code="usage")
+            raise ToolError(self.source, "нечего менять", code="usage")
         return self._json(f"/v2/video/{vid}/?client=vulp", method="PATCH", json_body=body)
 
     def _channel_id(self):
         data = self._jwt_payload(self._mint())
         cid = data.get("user_id") or (data.get("data") or {}).get("user_info", {}).get("id")
         if not cid:
-            raise StudyError(self.source, "не удалось определить id канала", code="auth")
+            raise ToolError(self.source, "не удалось определить id канала", code="auth")
         return cid
 
     def playlists(self):
@@ -220,7 +220,7 @@ class Rutube:
                          json_body={"url": src, "category_id": category or DEFAULT_CATEGORY})
         vid = out.get("video_id") or out.get("id")
         if not vid:
-            raise StudyError(self.source, f"video/ без id: {out}", code="upload")
+            raise ToolError(self.source, f"video/ без id: {out}", code="upload")
         return self._describe(vid, title, hidden, description=description, category=category,
                               age=age)
 
@@ -232,7 +232,7 @@ class Rutube:
                           method="POST", json_body={"title": title})
         sid, vid = sess.get("sid"), sess.get("video")
         if not sid or not vid:
-            raise StudyError(self.source, f"upload_session без sid/video: {sess}", code="upload")
+            raise ToolError(self.source, f"upload_session без sid/video: {sess}", code="upload")
         card = self._describe(vid, title, hidden, description=description, category=category,
                               age=age)
         self._tus(sid, vid, path.read_bytes())
@@ -250,5 +250,5 @@ class Rutube:
                             data=body, where="tus")
         got = int(hd.get("Upload-Offset", 0))
         if got != len(body):
-            raise StudyError(self.source, f"загружено {got} из {len(body)} байт", code="upload")
+            raise ToolError(self.source, f"загружено {got} из {len(body)} байт", code="upload")
         return got

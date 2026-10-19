@@ -6,7 +6,7 @@ import urllib.parse
 import urllib.request
 import uuid
 
-from .config import StudyError
+from .config import ToolError
 
 UA = "study/1"
 RETRIES = 2
@@ -31,12 +31,12 @@ def error(e, source, where):
     if isinstance(e, urllib.error.HTTPError):
         detail = (e.read() or b"")[:200].decode("utf-8", "replace").strip()
         msg = f"HTTP {e.code}: {detail}" if detail else f"HTTP {e.code} (пустой ответ)"
-        return StudyError(source, msg, where=where), e.code in RETRY_HTTP
+        return ToolError(source, msg, where=where), e.code in RETRY_HTTP
     if isinstance(e, urllib.error.URLError):
         bad_cert = isinstance(e.reason, ssl.SSLCertVerificationError)
-        return StudyError(source, f"нет связи: {e.reason}", where=where,
-                          code="certificate" if bad_cert else None), not bad_cert
-    return StudyError(source, f"нет связи: {e}", where=where), True
+        return ToolError(source, f"нет связи: {e.reason}", where=where,
+                         code="certificate" if bad_cert else None), not bad_cert
+    return ToolError(source, f"нет связи: {e}", where=where), True
 
 
 def send(url, source, *, method=None, headers=None, data=None, timeout=600, where=None,

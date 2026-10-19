@@ -1,15 +1,16 @@
-import argparse
 import json
 import pathlib
 import sys
 import time
 
-from . import agent, answer, assigns, courses, digest, files, hosting, local, setup, task, update
-from .config import Config, Course, StudyError, soft
-from .fmt import failures, moment, plain, table
+from kit.cli import add, confirm_gate, main as run, parser, read_text, table
+from kit.config import ToolError, soft
+
+from . import agent, assigns, courses, digest, files, setup, task, update
+from .config import Config, Course
+from .fmt import failures, moment, plain
 from .moodle import (SUBMISSION, Moodle, accepts, accepts_line, check_state, check_submission,
                      mb, submission_state)
-from .rutube import DEFAULT_CATEGORY, Rutube
 
 
 def course_of(cfg, value):
@@ -18,12 +19,8 @@ def course_of(cfg, value):
         return Course(int(value), codes.get(int(value)))
     cid = next((i for i, c in codes.items() if c == value), None)
     if cid is None:
-        raise StudyError("config", f"нет курса «{value}» (config.env: CODE <id> {value})")
+        raise ToolError("config", f"нет курса «{value}» (config.env: CODE <id> {value})")
     return Course(cid, value)
-
-
-def read_text(path):
-    return pathlib.Path(path).read_text(encoding="utf-8") if path else None
 
 
 def kv(pairs):
@@ -128,7 +125,7 @@ def cmd_grades(cfg, args):
     for c in tracked:
         try:
             grades = m.grades(c.id)
-        except StudyError as e:
+        except ToolError as e:
             lines.append(f"\n{c.title or c.id}: {e.message}")
             continue
         for t in grades:
@@ -179,12 +176,6 @@ def cmd_upload(cfg, args):
     itemid = Moodle(cfg).upload(paths, args.itemid)
     out = {"itemid": itemid, "files": [p.name for p in paths]}
     return out, "itemid: {} · загружено: {}".format(itemid, ", ".join(out["files"]))
-
-
-def confirm_gate(plan, lines, args, warning):
-    if args.confirm:
-        return None
-    return plan, "\n".join([*lines, "", warning]), 1
 
 
 def make_plan(args, text, attach, found=None, state=None, acc=None, problems=()):
@@ -252,118 +243,10 @@ def cmd_submit(cfg, args):
     return plan, "Отправлено: {} (id {})".format(plan["name"] or "?", args.assign_id)
 
 
-def pipe(target, call, show):
-    def run(cfg, args):
-        out = call(target(cfg, args), args)
-        return out, show(out, args)
-    return run
-
-
-def client(cfg, args):
-    return hosting.HOSTS[args.host](cfg, path=local.find_repo())
-
-
-def rt(cfg, args):
-    return Rutube(cfg, mode=args.mode)
-
-
-def anon(cfg, args):
-    return Rutube(cfg)
-
-
-def dump(out, args):
-    return json.dumps(out, ensure_ascii=False, indent=1)
-
-
-def videos_table(rows):
-    return table([[str(v["id"]), v["title"] or "", "скрыто" if v["hidden"] else "", v["url"] or ""]
-                  for v in rows], ["id", "название", "", "ссылка"])
-
-
-def dated_videos_table(rows):
-    return table([[str(v["id"]), v["title"] or "", (v.get("created") or "")[:10], v["url"] or ""]
-                  for v in rows], ["id", "название", "создано", "ссылка"])
-
-
-def video_text(v, args):
-    keys = [("id", "id"), ("title", "название"), ("is_hidden", "скрыто"),
-            ("video_url", "ссылка"), ("duration", "длительность")]
-    cat = (v.get("category") or {}).get("name")
-    return "\n".join([f"{label}: {v.get(k)}" for k, label in keys] + [f"категория: {cat}"])
-
-
-def edit_video(r, args):
-    fields = {"title": args.title, "category": args.category, "age": args.age,
-              "description": read_text(args.desc)}
-    if args.hidden or args.visible:
-        fields["is_hidden"] = not args.visible
-    return r.edit(args.video_id, **fields)
-
-
-def playlist_text(p, args):
-    text = f"плейлист создан: {p['id']} {p['url'] or ''}".rstrip()
-    return text + (f"\nRUTUBE_PLAYLIST={p['url']}" if p["url"] else "")
-
-
-def releases_text(rows, args):
-    return table([[r["tag"] or "—", r.get("name") or "", str(r["assets"]),
-                   r.get("status") or ""] for r in rows],
-                 ["тег", "название", "файлов", "статус"]) or "релизов нет"
-
-
-def cmd_rt_upload(cfg, args):
-    if bool(args.file) == bool(args.url):
-        raise StudyError("rutube", "укажи либо файл, либо --url (одно из двух)", code="usage")
-    title = args.title or (pathlib.Path(args.file).stem if args.file else None)
-    category = args.category or DEFAULT_CATEGORY
-    age = 0 if args.age is None else args.age
-    plan = {"source": args.url or args.file, "title": title, "category": category, "age": age,
-            "hidden": args.hidden, "playlist": args.playlist, "confirmed": bool(args.confirm)}
-    lines = []
-    if not args.confirm:
-        size = f" ({pathlib.Path(args.file).stat().st_size} байт)" if args.file else ""
-        lines = ["Что будет загружено на Rutube:",
-                 f"  источник: {('URL ' + args.url) if args.url else args.file + size}",
-                 f"  название: {title or '?'}",
-                 f"  категория: {category}   возраст: {age}+",
-                 f"  видимость: {'скрыто' if args.hidden else 'публично'}",
-                 f"  плейлист: {args.playlist or 'нет'}"]
-    gate = confirm_gate(plan, lines, args,
-                        "Загрузка публикует видео в твой аккаунт. Повтори с --confirm.")
-    if gate:
-        return gate
-    r = rt(cfg, args)
-    up = r.upload_url if args.url else r.upload_file
-    v = up(args.url or args.file, title=title, description=read_text(args.desc),
-           category=category, hidden=args.hidden, age=age)
-    text = f"загружено: {v['id']} {v['url']}" + (" (скрыто)" if v["hidden"] else "")
-    if args.slot:
-        text += f"\nRUTUBE_{args.slot.upper()}={v['url']}"
-    if args.playlist:
-        try:
-            r.playlist_add(args.playlist, v["id"])
-        except StudyError as e:
-            v = {**v, "playlist_error": e.message}
-            text += (f"\nв плейлист {args.playlist} не добавлено ({e.message}); видео ещё "
-                     f"обрабатывается — через несколько минут: "
-                     f"study rt playlist add {args.playlist} {v['id']}")
-    return v, text
-
-
-def cmd_digest(cfg, args):
-    d = digest.collect(cfg, Moodle(cfg), days=args.days, save=not args.no_save, since=args.since)
-    return d, digest.render_digest(d)
-
-
 def cmd_state(cfg, args):
-    d = digest.state(cfg, Moodle(cfg), days=args.days, with_tuis=not args.local,
-                     save=not args.no_save, pull=args.pull, since=args.since)
+    d = digest.state(cfg, Moodle(cfg), days=args.days, save=not args.no_save, pull=args.pull,
+                     since=args.since)
     return d, digest.render(d)
-
-
-def cmd_answer(cfg, args):
-    d = answer.build(cfg, args.code, args.num, args.tag)
-    return d, answer.render(d)
 
 
 def cmd_task(cfg, args):
@@ -398,40 +281,16 @@ def cmd_agent(cfg, args):
     return rows, agent.render(rows, installed=bool(args.operator))
 
 
-JSON = argparse.ArgumentParser(add_help=False)
-JSON.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
-                  help="машиночитаемый вывод")
-MODE = argparse.ArgumentParser(add_help=False)
-MODE.add_argument("--mode", choices=["auto", "jwt", "token"], default="auto",
-                  help="какой вход Rutube использовать (по умолчанию auto)")
 SINCE = {"help": "считать прошлым запуском: ГГГГ-ММ-ДД, N дней назад, never, all"}
-
-
-def add(sub, name, doc, fn, *parents):
-    s = sub.add_parser(name, help=doc, description=doc, parents=[JSON, *parents])
-    s.set_defaults(fn=fn)
-    return s
 
 
 def tuis_parsers(sub):
     s = add(sub, "state",
             "готовая ежедневная сводка: сроки, баллы, новое в курсах, состояние работ", cmd_state)
     s.add_argument("--days", type=int, help="окно дедлайнов, дней")
-    s.add_argument("--local", action="store_true", help="без обращения к ТУИС")
     s.add_argument("--no-save", action="store_true", help="не обновлять снимок состояния")
     s.add_argument("--pull", action="store_true", help="забрать новые файлы курсов в stash/")
     s.add_argument("--since", **SINCE)
-
-    s = add(sub, "digest", "та же сводка, но только по ТУИС, без репозиториев", cmd_digest)
-    s.add_argument("--days", type=int, help="окно дедлайнов, дней")
-    s.add_argument("--no-save", action="store_true", help="не обновлять снимок состояния")
-    s.add_argument("--since", **SINCE)
-
-    s = add(sub, "answer", "заготовка ответа в ТУИС по лабораторной (курсы с FLOW release)",
-            cmd_answer)
-    s.add_argument("code", help="код предмета, каталог в ~/work/study")
-    s.add_argument("num", help="номер лабораторной работы (NN)")
-    s.add_argument("--tag", help="тег релиза; по умолчанию последний")
 
     s = add(sub, "update", "обновить study из репозитория и блоки агента", cmd_update)
     s.add_argument("--check", action="store_true", help="только проверить, ничего не менять")
@@ -500,149 +359,12 @@ def submit_parser(sub):
     s.add_argument("--confirm", action="store_true", help="подтвердить отправку")
 
 
-def host_parsers(sub):
-    for key, cls in hosting.HOSTS.items():
-        h = sub.add_parser(key, help=cls.host + ": релизы и вложения")
-        h.set_defaults(host=key)
-        hs = h.add_subparsers(dest="hostcmd", required=True, metavar="команда")
-        add(hs, "releases", "список релизов",
-            pipe(client, lambda c, _: c.releases(), releases_text))
-        s = add(hs, "release", "создать релиз", pipe(
-            client, lambda c, a: c.release(a.tag, a.title, read_text(a.notes), sha=a.sha),
-            lambda o, _: "Релиз {} создан: {}".format(o["tag"], o["url"])))
-        s.add_argument("tag")
-        s.add_argument("--title", required=True)
-        s.add_argument("--notes", required=True, help="файл с описанием")
-        s.add_argument("--sha", help="GitVerse: полный SHA; по умолчанию из тега")
-        s = add(hs, "update", "изменить название или описание релиза", pipe(
-            client, lambda c, a: c.update(a.tag, title=a.title, notes=read_text(a.notes)),
-            lambda o, _: "Релиз {} обновлён: {}".format(o["tag"], o["url"])))
-        s.add_argument("tag")
-        s.add_argument("--title")
-        s.add_argument("--notes", help="файл с описанием")
-        s = add(hs, "asset", "загрузить файл в релиз", pipe(
-            client, lambda c, a: c.asset(a.release, a.file, a.name),
-            lambda o, _: "Загружено: " + o["name"]))
-        s.add_argument("release", help="GitVerse: id релиза, SourceCraft: тег")
-        s.add_argument("file")
-        s.add_argument("--name", help="имя файла в релизе")
-        s = add(hs, "api", "произвольный запрос",
-                pipe(client, lambda c, a: c.api(a.path), dump))
-        s.add_argument("path", help="например /repos/owner/repo/releases")
-
-
-def rt_parsers(sub):
-    r = sub.add_parser("rt", help="Rutube: вход и видео")
-    rs = r.add_subparsers(dest="rtcmd", required=True, metavar="команда")
-    s = add(rs, "login", "режим token: вход по email и паролю (пароль не хранится); "
-            "только для аккаунтов с паролем", pipe(
-                anon, lambda r, a: r.login(a.email),
-                lambda o, _: "Rutube: сохранён token (режим token): " + o["token_file"]))
-    s.add_argument("--email")
-    s = add(rs, "jwt", "режим jwt: сохранить refreshToken из cookie браузера (VK ID / Gazprom ID)",
-            pipe(anon, lambda r, a: r.save_refresh(a.refresh),
-                 lambda o, _: "Rutube: сохранён refresh_token (режим jwt): " + o["refresh_file"]))
-    s.add_argument("--refresh", help="сам refreshToken или строка cookie; без флага спросит скрыто")
-    add(rs, "me", "проверить вход: мои видео",
-        pipe(rt, lambda r, _: r.me(),
-             lambda o, _: videos_table(o) or "вход работает, видео пока нет"),
-        MODE)
-    s = add(rs, "api", "произвольный GET к rutube.ru/api",
-            pipe(rt, lambda r, a: r.api(a.path), dump), MODE)
-    s.add_argument("path", help="например /video/person/")
-    add(rs, "categories", "список категорий Rutube (id для --category)", pipe(
-        anon, lambda r, _: r.categories(),
-        lambda o, _: table([[str(c["id"]), c["short"] or "", c["name"] or ""] for c in o],
-                           ["id", "код", "название"])))
-    s = add(rs, "video", "метаданные и состояние своего видео",
-            pipe(rt, lambda r, a: r.video(a.video_id), video_text), MODE)
-    s.add_argument("video_id")
-    s = add(rs, "edit", "правка названия/описания/категории/видимости", pipe(
-        rt, edit_video, lambda o, a: "готово: " + (o.get("title") or a.video_id)), MODE)
-    s.add_argument("video_id")
-    s.add_argument("--title")
-    s.add_argument("--desc", help="файл с описанием")
-    s.add_argument("--category", type=int, help="id категории (см. rt categories)")
-    s.add_argument("--age", type=int, choices=[0, 6, 12, 14, 16, 18], help="возрастное ограничение")
-    s.add_argument("--hidden", action="store_true", help="сделать скрытым")
-    s.add_argument("--visible", action="store_true", help="сделать публичным")
-
-    p = rs.add_parser("playlist", help="плейлисты: list/create/add/remove/videos")
-    ps = p.add_subparsers(dest="plcmd", required=True, metavar="действие")
-    add(ps, "list", "свои плейлисты", pipe(
-        rt, lambda r, _: r.playlists(), lambda o, _: videos_table(o) or "плейлистов нет"), MODE)
-    s = add(ps, "create", "создать плейлист", pipe(
-        rt, lambda r, a: r.playlist_create(a.title, a.hidden), playlist_text), MODE)
-    s.add_argument("--title", required=True)
-    s.add_argument("--hidden", action="store_true", help="скрытый плейлист")
-    s = add(ps, "add", "добавить видео в плейлист", pipe(
-        rt, lambda r, a: r.playlist_add(a.playlist_id, a.video_id),
-        lambda _, a: f"видео {a.video_id} → плейлист {a.playlist_id}"), MODE)
-    s.add_argument("playlist_id")
-    s.add_argument("video_id")
-    s = add(ps, "remove", "убрать видео из плейлиста", pipe(
-        rt, lambda r, a: r.playlist_remove(a.playlist_id, a.video_id),
-        lambda _, a: f"видео {a.video_id} убрано из плейлиста {a.playlist_id}"), MODE)
-    s.add_argument("playlist_id")
-    s.add_argument("video_id")
-    s = add(ps, "videos", "состав плейлиста", pipe(
-        rt, lambda r, a: r.playlist_videos(a.playlist_id),
-        lambda o, _: dated_videos_table(o) or "плейлист пуст"), MODE)
-    s.add_argument("playlist_id")
-
-    s = add(rs, "upload", "загрузить видео: файл (tus) или --url", cmd_rt_upload, MODE)
-    s.add_argument("file", nargs="?", help="локальный видеофайл (либо задать --url)")
-    s.add_argument("--url", help="импорт по URL — Rutube скачает сам")
-    s.add_argument("--title")
-    s.add_argument("--desc", help="файл с описанием")
-    s.add_argument("--category", type=int,
-                   help=f"id категории (см. rt categories; по умолчанию {DEFAULT_CATEGORY})")
-    s.add_argument("--age", type=int, choices=[0, 6, 12, 14, 16, 18],
-                   help="возраст (по умолчанию 0+)")
-    s.add_argument("--hidden", action="store_true", help="загрузить скрытым")
-    s.add_argument("--playlist", help="id плейлиста — сразу добавить туда")
-    s.add_argument("--slot", choices=["lab", "report", "presentation", "defense"],
-                   help="напечатать строку RUTUBE_<SLOT>= для tuis/labNN.env")
-    s.add_argument("--confirm", action="store_true", help="подтвердить загрузку (без него — план)")
-
-
-class Version(argparse.Action):
-
-    def __call__(self, parser, *_):
-        print(f"study {update.version()}")
-        parser.exit()
-
-
 def build_parser():
-    p = argparse.ArgumentParser(
-        prog="study", description="ТУИС, репозитории курсов и хостинги одной командой.")
-    p.add_argument("--json", action="store_true", help="машиночитаемый вывод")
-    p.add_argument("--version", action=Version, nargs=0, help="версия по тегам git")
+    p = parser("study", "ТУИС одной командой: сводка, задания, файлы курсов, отправка ответа.")
     sub = p.add_subparsers(dest="cmd", required=True, metavar="команда")
     tuis_parsers(sub)
-    host_parsers(sub)
-    rt_parsers(sub)
     return p
 
 
 def main(argv=None):
-    parser = build_parser()
-    argv = sys.argv[1:] if argv is None else list(argv)
-    if not argv:
-        parser.print_help()
-        return 0
-    args = parser.parse_args(argv)
-    try:
-        data, text, *rc = args.fn(Config(), args)
-        print(json.dumps(data, ensure_ascii=False, indent=1) if args.json else text)
-    except StudyError as e:
-        print(e.text(), file=sys.stderr)
-        if e.hint():
-            print(e.hint(), file=sys.stderr)
-        return 2
-    except BrokenPipeError:
-        return 0
-    except KeyboardInterrupt:
-        print("", file=sys.stderr)
-        return 130
-    return rc[0] if rc else 0
+    return run(build_parser(), Config, argv)

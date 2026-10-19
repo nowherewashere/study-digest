@@ -3,7 +3,9 @@ import json
 import re
 import time
 
-from .config import StudyError, write_atomic
+from kit.config import ToolError, write_atomic
+
+from .fmt import MSK, msk
 
 KEEP_DAYS = 60
 DAY = 86400
@@ -54,11 +56,12 @@ def load_state(cfg, since=None, errors=None):
         since = int(time.time()) - int(since) * DAY
     else:
         try:
-            since = int(datetime.datetime.strptime(since, "%Y-%m-%d").timestamp())
+            day = datetime.datetime.strptime(since, "%Y-%m-%d").replace(tzinfo=MSK)
+            since = int(day.timestamp())
         except ValueError:
-            raise StudyError("config", "--since: ожидается ГГГГ-ММ-ДД, число дней, never или all, "
-                                       f"а не «{since}»") from None
-    state, _ = latest(history(cfg, time.strftime("%Y-%m-%d", time.localtime(since))))
+            raise ToolError("config", "--since: ожидается ГГГГ-ММ-ДД, число дней, never или all, "
+                                      f"а не «{since}»") from None
+    state, _ = latest(history(cfg, msk(since).strftime("%Y-%m-%d")))
     if state is not None:
         return state
     state = (read(current) if current.exists() else None) or {}
@@ -72,8 +75,8 @@ def save_state(cfg, state):
     write_atomic(current, text)
     hist = history_dir(cfg)
     hist.mkdir(exist_ok=True)
-    write_atomic(hist / time.strftime("%Y-%m-%d.json", time.localtime(state["last_run"])), text)
-    cutoff = time.strftime("%Y-%m-%d", time.localtime(state["last_run"] - KEEP_DAYS * DAY))
+    write_atomic(hist / msk(state["last_run"]).strftime("%Y-%m-%d.json"), text)
+    cutoff = msk(state["last_run"] - KEEP_DAYS * DAY).strftime("%Y-%m-%d")
     for p in hist.glob("????-??-??.json"):
         if p.stem < cutoff:
             p.unlink()

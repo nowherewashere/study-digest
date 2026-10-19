@@ -14,7 +14,6 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         python: ["3.8", "3.12"]
     env:
-      TZ: MSK-3
       PYTHONIOENCODING: utf-8
     steps:
       - uses: actions/checkout@v4
@@ -24,12 +23,17 @@ jobs:
       - name: Тесты
         run: python -m unittest -v
       - name: Синтаксис
-        run: python -m compileall -q src study install.py
-      - name: Лаунчер
-        run: python study --version
+        run: python -m compileall -q src study gitverse sourcecraft rutube labrelease install.py
+      - name: Лаунчеры
+        run: |
+          python study --version
+          python gitverse --help
+          python sourcecraft --help
+          python rutube --help
+          python labrelease --help
       - name: ruff
         if: matrix.os == 'ubuntu-latest' && matrix.python == '3.12'
-        run: pipx run ruff check src tests study install.py
+        run: pipx run ruff check src tests study gitverse sourcecraft rutube labrelease install.py
       - name: shellcheck
         if: matrix.os == 'ubuntu-latest' && matrix.python == '3.12'
         run: shellcheck -S warning setup.sh
