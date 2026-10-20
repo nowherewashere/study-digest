@@ -32,7 +32,7 @@ hidden assignments, the state of an answer, new files — is the client's job an
 | `mod_quiz_get_quizzes_by_courses` | quizzes: open/close time, time limit, attempts | `courseids[]` |
 | `mod_quiz_get_user_attempts` | my quiz attempts | `quizid`, `status=all` |
 | `mod_choice_get_choices_by_courses`, `mod_choice_get_choice_options` | talk topic choices and whether one is chosen | `courseids[]`, `choiceid` |
-| `gradereport_user_get_grade_items` | grades and course total | `courseid`, `userid` |
+| `gradereport_user_get_grade_items` | grades and course total; a course with the gradebook hidden from students answers `nopermissiontoviewgrades`, and the digest then sums the grades of its assignments from `mod_assign_get_submission_status` | `courseid`, `userid` |
 | `core_calendar_get_action_events_by_timesort` | deadlines of all courses | `timesortfrom`, `timesortto`, `limitnum` ≤ 50, cursor `aftereventid` |
 | `core_message_get_messages` | TUIS notifications | `useridto`, `type=notifications`, `read=0` |
 | `mod_forum_get_forums_by_courses`, `mod_forum_get_forum_discussions` | announcements (forums of `type: news`) | `courseids[]`, `forumid` |

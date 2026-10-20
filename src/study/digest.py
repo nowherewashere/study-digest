@@ -185,6 +185,13 @@ def course_grades(course, report, known):
     return out
 
 
+def assign_report(assigns, raw, statuses):
+    return [{"gradeitems": [
+        {"itemname": a["name"], "itemtype": "mod", "grademax": float(raw[a["assign_id"]]["grade"]),
+         "graderaw": float(s["grade"]) if s and s["grade"] is not None else None}
+        for a in assigns for s in [statuses.get(a["assign_id"])]]}]
+
+
 def outside_courses(events, tracked, ignore, now, horizon):
     groups = {}
     for e in events:
@@ -342,16 +349,18 @@ class Collector:
                                 "subject": plain(m.get("subject"), 120)})
         return sorted(out, key=lambda n: -n["at"]["ts"])
 
-    def grades(self):
+    def grades(self, assigns, raw, st):
         out = []
         for cid in self.courses:
             with self.soft(f"оценки, курс {cid}"):
                 try:
                     report = self.moodle.grades(cid)
                 except ToolError as e:
-                    if e.code == "nopermissiontoviewgrades":
-                        continue
-                    raise
+                    if e.code != "nopermissiontoviewgrades":
+                        raise
+                    mine = [a for a in assigns if a["course"]["id"] == cid
+                            and (raw[a["assign_id"]].get("grade") or 0) > 0]
+                    report = assign_report(mine, raw, self.fetch_statuses(mine, raw, st))
                 out += course_grades(self.course(cid), report, self.state.get("grades"))
         return out
 
@@ -399,7 +408,7 @@ class Collector:
         announcements, seen = self.announcements()
         updates = self.updates()
         notifications = self.notifications()
-        grades = self.grades()
+        grades = self.grades(list(base.values()), raw, st)
         outside = self.outside()
         known = self.state.get("courses")
         data = {

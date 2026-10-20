@@ -501,6 +501,24 @@ class CollectorTest(DigestCase):
         self.assertTrue(rendered(d).endswith(
             "\nНе удалось: moodle · оценки, курс 1 · no."))
 
+    def test_closed_gradebook_falls_back_to_assignments(self):
+        queue(self.net)
+        self.net.drop("assignid=21")
+        self.net.reply("POST", ("mod_assign_get_submission_status", "assignid=21"),
+                       fixture("submission_status_reopened"))
+        self.net.reply("POST", ("core_comment_get_comments", "itemid=5003"),
+                       fixture("comments_empty"))
+        self.net.drop("gradereport_user_get_grade_items", "courseid=2")
+        self.net.reply("POST", ("gradereport_user_get_grade_items", "courseid=2"),
+                       {"exception": "x", "errorcode": "nopermissiontoviewgrades", "message": "no"})
+        d = digest.Collector(self.cfg, Moodle(self.cfg), 21, STATE).run()
+        g = next(g for g in d["grades"] if g["course"]["id"] == 2)
+        self.assertEqual([(i["name"], i["raw"], i["max"]) for i in g["items"]],
+                         [("Загрузка 1 лабораторной работы", 4.0, 10.0)])
+        self.assertEqual(g["total"], {"raw": 4.0, "max": 10.0, "computed": True})
+        self.assertEqual(d["errors"], [])
+        self.assertIn("| Вычислительные методы | 4.00 / 10 |", rendered(d))
+
     def test_render_golden(self):
         _, d = self.collect()
         self.assertEqual(rendered(d), fixture("digest.md").rstrip("\n"))
