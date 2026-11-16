@@ -98,6 +98,7 @@ def git(path, *args):
 def repo(path, remotes=None, tag=None):
     path.mkdir(parents=True, exist_ok=True)
     git(path, "init", "-q")
+    git(path, "config", "maintenance.auto", "false")
     for name, url in (remotes or {}).items():
         git(path, "remote", "add", name, url)
     git(path, "commit", "-q", "--allow-empty", "-m", "chore: init")
