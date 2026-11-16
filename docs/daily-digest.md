@@ -4,6 +4,18 @@ Once a day an AI agent runs `study state --pull` and prints the result as is —
 out the digest, the agent adds nothing. The steps are the skill
 [study-digest](../skills/study-digest/SKILL.md), installed by `study agent`.
 
+## Retakes
+
+Separate assignments named `Пересдача лабораторной работы № N` or `Пересдача ЛР N` are
+matched to the original laboratory work by course and number. This is a course naming
+convention, not a Moodle relationship. A submitted or graded retake removes its original
+from overdue reminders without changing either submission in TUIS. The original's feedback
+and comments remain available in the digest.
+
+For originals in the overdue window, retakes are checked even when their deadline is outside
+the digest window or unset. Drafts, unsubmitted retakes and failed status requests do not
+clear the original reminder. Matching never crosses courses.
+
 ## Claude Code Desktop
 
 Code → **Routines** → New routine → **Local** (a cloud routine cannot see local files and

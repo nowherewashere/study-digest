@@ -124,6 +124,58 @@ class CollectorTest(DigestCase):
         self.assertEqual((pick["choice"]["chosen"], pick["submission"]), ("Тема Б", "submitted"))
         self.assertNotIn("Тема доклада", rendered(d))
 
+    def test_retake_covers_overdue_original(self):
+        for due in (NOW + 8 * DAY, NOW + 60 * DAY, NOW - 60 * DAY, 0):
+            for status, graded, covered in (("submitted", False, True),
+                                            ("new", True, True), ("new", False, False),
+                                            ("draft", False, False),
+                                            ("reopened", False, False)):
+                with self.subTest(due=due, status=status, graded=graded):
+                    queue(self.net)
+                    self.net.drop("mod_assign_get_assignments")
+                    assignments = fixture("assignments")
+                    labs = assignments["courses"][0]["assignments"]
+                    next(a for a in labs if a["id"] == 19)["duedate"] = NOW - DAY
+                    next(a for a in labs if a["id"] == 20)["duedate"] = due
+                    self.net.reply("POST", "mod_assign_get_assignments", assignments)
+                    self.net.drop("mod_assign_get_submission_status", "assignid=20")
+                    reply = fixture("submission_status_new")
+                    reply["lastattempt"]["submission"]["status"] = status
+                    reply["lastattempt"]["graded"] = graded
+                    self.net.reply("POST", ("mod_assign_get_submission_status", "assignid=20"),
+                                   reply)
+                    d = digest.Collector(self.cfg, Moodle(self.cfg), 21, STATE).run()
+                    self.assertEqual("ЛР 5 — RIP" not in names(d["overdue"]), covered)
+                    self.assertIn("ДЗ 1 — Кодирование", names(d["overdue"]))
+                    self.assertEqual(d["errors"], [])
+
+    def test_retake_does_not_cover_other_course(self):
+        queue(self.net)
+        self.net.drop("mod_assign_get_assignments")
+        assignments = fixture("assignments")
+        next(a for a in assignments["courses"][0]["assignments"]
+             if a["id"] == 11)["duedate"] = NOW - DAY
+        self.net.reply("POST", "mod_assign_get_assignments", assignments)
+        d = digest.Collector(self.cfg, Moodle(self.cfg), 21, STATE).run()
+        self.assertIn("ЛР 1 — Vagrant и Packer", names(d["overdue"]))
+        self.assertEqual(d["errors"], [])
+
+    def test_unavailable_retake_keeps_overdue_original(self):
+        queue(self.net)
+        self.net.drop("mod_assign_get_assignments")
+        assignments = fixture("assignments")
+        labs = assignments["courses"][0]["assignments"]
+        next(a for a in labs if a["id"] == 19)["duedate"] = NOW - DAY
+        next(a for a in labs if a["id"] == 20)["duedate"] = NOW + 60 * DAY
+        self.net.reply("POST", "mod_assign_get_assignments", assignments)
+        self.net.drop("mod_assign_get_submission_status", "assignid=20")
+        self.net.reply("POST", ("mod_assign_get_submission_status", "assignid=20"),
+                       {"exception": "moodle_exception", "errorcode": "nopermissions",
+                        "message": "No access"})
+        d = digest.Collector(self.cfg, Moodle(self.cfg), 21, STATE).run()
+        self.assertIn("ЛР 5 — RIP", names(d["overdue"]))
+        self.assertTrue(d["errors"])
+
     def test_retakes(self):
         _, d = self.collect()
         self.assertEqual([(r["short"], r["retake_of"], r["needed"]) for r in d["retakes"]],

@@ -94,9 +94,10 @@ def merged(a, *extras):
     return a
 
 
-def deadline_sections(soon, overdue):
+def deadline_sections(soon, overdue, covered=()):
     deadlines = [a for a in soon if a.get("needed", True)]
-    late = [a for a in overdue if a.get("needed", True)]
+    late = [a for a in overdue
+            if a.get("needed", True) and a["assign_id"] not in covered]
     live = by_due(soon + overdue)
     return {
         "deadlines": deadlines,
@@ -382,7 +383,12 @@ class Collector:
         new_ids, moved = changes(base, self.state.get("assignments", {}), self.since, now)
 
         live = by_due([base[i] for i in live_ids(base, now, self.horizon)])
-        retakes = [a for a in live if a["retake"]]
+        late_labs = {(a["course"]["id"], a["lab"]) for a in live
+                     if a["lab"] and a["due"]["ts"] < now}
+        live_cmids = {a["cmid"] for a in live}
+        retakes = [a for a in base.values() if a["retake"]
+                   and (a["cmid"] in live_cmids
+                        or (a["course"]["id"], a["retake"]) in late_labs)]
         st = self.fetch_statuses([a for a in live if not a["retake"]], raw, {})
         items = with_statuses(base, st, fb, now, cm)
         st = self.fetch_statuses([o for o in originals(retakes, items).values() if o], raw, st)
@@ -403,6 +409,11 @@ class Collector:
 
         soon = by_due([merged(items[i], info) for i in soon_ids]
                       + [merged(a, info, picks) for a in extras])
+        linked = originals(retakes, items)
+        covered = {orig["assign_id"]
+                   for r in retakes for orig in [linked[r["cmid"]]]
+                   if orig and (items[str(r["assign_id"])]["submission"] == "submitted"
+                                or items[str(r["assign_id"])]["graded"])}
         overdue = by_due([merged(items[i], info) for i in late_ids])
         quizzes = self.quizzes()
         announcements, seen = self.announcements()
@@ -418,7 +429,7 @@ class Collector:
             "courses": [c.as_dict() for c in self.courses.values()],
             "new_courses": [c.as_dict() for c in self.courses.values()
                             if known is not None and str(c.id) not in known],
-            **deadline_sections(soon, overdue),
+            **deadline_sections(soon, overdue, covered),
             "quizzes": quizzes, "announcements": announcements, "updates": updates,
             "new_assignments": [items[i] for i in new_ids], "moved": moved,
             "notifications": notifications, "grades": grades, "outside": outside,
