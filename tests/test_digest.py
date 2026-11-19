@@ -609,18 +609,21 @@ class StateTest(DigestCase):
         self.cfg.state_file().write_text(json.dumps(STATE), encoding="utf-8")
         queue(self.net)
         self.net.reply("GET", "002-dns.pdf?forcedownload=1&token=test-token", b"%PDF-2")
+        self.net.reply("GET", "video.mp4", b"video")
+        self.net.reply("GET", "big.zip", b"archive")
         d = digest.state(self.cfg, Moodle(self.cfg), save=False, pull=True)
         self.assertEqual(sorted(d), ["days", "errors", "now", "schema", "tuis", "update"])
         self.assertEqual((d["schema"], d["update"]), (2, {"behind": 0, "agents": []}))
         self.assertEqual((self.tmp / "nettech/stash/002-dns.pdf").read_bytes(), b"%PDF-2")
         pulled = {u["item"]: u.get("pulled") for u in d["tuis"]["updates"]}
-        self.assertEqual(pulled, {"Методичка 2": ["002-dns.pdf"], "Материалы": [],
+        self.assertEqual(pulled, {"Методичка 2": ["002-dns.pdf"],
+                                  "Материалы": ["video.mp4", "big.zip"],
                                   "(модуль 999)": None, "Лекции": None})
         self.assertEqual(d["errors"], [])
         text = digest.render(d)
         self.assertIn("| nettech | Лабораторные работы | Методичка 2: новые файлы | 002-dns.pdf |",
                       text)
-        self.assertIn("video.mp4, big.zip — не скачаны; ссылка → https://example.org/", text)
+        self.assertIn("video.mp4, big.zip; ссылка → https://example.org/", text)
         self.assertIn("lecture-01.pdf — у курса нет папки", text)
 
     def test_update_error_is_soft(self):

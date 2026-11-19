@@ -8,10 +8,7 @@ from kit.config import ROOT, ToolError
 from .fmt import moment
 from .snapshot import load_state
 
-DOCS = {".pdf", ".doc", ".docx", ".odt", ".rtf", ".md", ".txt", ".tex", ".bib",
-        ".ppt", ".pptx", ".odp", ".xls", ".xlsx", ".ods", ".csv",
-        ".zip", ".7z", ".rar", ".tar", ".gz"}
-MAX_SIZE = 50 * 1024 * 1024
+MAX_SIZE = 100 * 1024 * 1024
 
 
 def present(into, name):
@@ -51,13 +48,11 @@ def is_link(content):
     return kind(content) == "url"
 
 
-def skip_reason(size, ext):
+def skip_reason(size):
     if not size:
         return "страница курса"
-    if ext not in DOCS:
-        return "тип " + (ext or "без расширения")
     if size > MAX_SIZE:
-        return "размер %.0f МБ" % (size / 1048576)
+        return "размер %.0f МиБ" % (size / 1048576)
     return None
 
 
@@ -105,7 +100,7 @@ def listing(cfg, moodle, course, since=None, everything=False):
                         "newer": bool(have) and (c.get("timemodified") or 0)
                         > int(have.stat().st_mtime),
                         "new": fresh(m, c, since, known),
-                        "skip": "ссылка" if link else skip_reason(size, ext)}
+                        "skip": "ссылка" if link else skip_reason(size)}
                 if everything or item["new"]:
                     out.append(item)
     out.sort(key=lambda x: -(x["modified"]["ts"] if x["modified"] else 0))

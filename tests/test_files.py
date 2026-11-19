@@ -31,8 +31,8 @@ class FilesTest(MoodleCase):
                          ["002-dns.pdf", "video.mp4", "big.zip"])
         self.assertEqual({n: (f["skip"], f["have"], f["new"]) for n, f in rows.items()},
                          {"002-dns.pdf": (None, False, True),
-                          "video.mp4": ("тип .mp4", False, True),
-                          "big.zip": ("размер 60 МБ", False, True),
+                          "video.mp4": (None, False, True),
+                          "big.zip": (None, False, True),
                           "Ссылка → https://example.org/": ("ссылка", False, True),
                           "lecture-01.pptx": (None, True, False),
                           "index.html": ("страница курса", False, False)})
@@ -68,15 +68,22 @@ class FilesTest(MoodleCase):
         with self.assertRaises(ToolError):
             files.stash(Course(2))
 
+    def reply_downloads(self):
+        self.net.reply("GET", "video.mp4", b"video")
+        self.net.reply("GET", "big.zip", b"archive")
+
     def test_pull(self):
         self.stash.mkdir(parents=True)
         (self.stash / "lecture-01.pptx").write_bytes(b"old")
         os.utime(self.stash / "lecture-01.pptx", (NOW, NOW))
         d = files.listing(self.cfg, self.m, self.course, since=SINCE, everything=True)
         self.net.reply("GET", "002-dns.pdf?forcedownload=1&token=test-token", b"%PDF-2")
+        self.reply_downloads()
         out = files.pull(self.m, d)
-        self.assertEqual(out["pulled"], [{"name": "002-dns.pdf", "bytes": 6, "updated": False,
-                                          "path": str(self.stash / "002-dns.pdf")}])
+        self.assertEqual([f["name"] for f in out["pulled"]],
+                         ["002-dns.pdf", "video.mp4", "big.zip"])
+        self.assertEqual((self.stash / "video.mp4").read_bytes(), b"video")
+        self.assertEqual((self.stash / "big.zip").read_bytes(), b"archive")
         self.assertEqual((self.stash / "002-dns.pdf").read_bytes(), b"%PDF-2")
         self.assertEqual(int((self.stash / "002-dns.pdf").stat().st_mtime), 1789531200)
         self.assertEqual((self.stash / "lecture-01.pptx").read_bytes(), b"old")
@@ -84,8 +91,8 @@ class FilesTest(MoodleCase):
         text = files.render(out, pulled=True)
         self.assertIn("скачан       002-dns.pdf", text)
         self.assertIn("уже есть     lecture-01.pptx", text)
-        self.assertIn("пропущен: тип .mp4 video.mp4", text)
-        self.assertIn(f"В {self.stash}: скачано 1", text)
+        self.assertIn("скачан       video.mp4", text)
+        self.assertIn(f"В {self.stash}: скачано 3", text)
 
     def test_pull_refreshes_newer(self):
         old = self.stash / "old" / "lecture-01.pptx"
@@ -96,18 +103,20 @@ class FilesTest(MoodleCase):
         row = next(f for f in d["files"] if f["name"] == "lecture-01.pptx")
         self.assertTrue(row["newer"])
         self.assertIn("есть, в ТУИС новее lecture-01.pptx", files.render(d))
-        self.assertEqual(files.summary(d), "nettech: 2 к загрузке")
+        self.assertEqual(files.summary(d), "nettech: 4 к загрузке")
         self.net.reply("GET", "002-dns.pdf?forcedownload=1&token=test-token", b"%PDF-2")
         self.net.reply("GET", "lecture-01.pptx?token=test-token", b"new")
+        self.reply_downloads()
         out = files.pull(self.m, d)
         self.assertEqual([(g["name"], g["updated"]) for g in out["pulled"]],
-                         [("002-dns.pdf", False), ("lecture-01.pptx", True)])
+                         [("002-dns.pdf", False), ("video.mp4", False),
+                          ("big.zip", False), ("lecture-01.pptx", True)])
         self.assertEqual((old.read_bytes(), int(old.stat().st_mtime)), (b"new", 1789279200))
         self.assertFalse((self.stash / "lecture-01.pptx").exists())
         text = files.render(out, pulled=True)
         self.assertIn("обновлён     lecture-01.pptx", text)
-        self.assertIn("скачано 2, из них обновлено 1", text)
-        self.assertEqual(files.summary(out, pulled=True), "nettech: скачано 2, из них обновлено 1")
+        self.assertIn("скачано 4, из них обновлено 1", text)
+        self.assertEqual(files.summary(out, pulled=True), "nettech: скачано 4, из них обновлено 1")
 
     def test_pull_force_and_error(self):
         self.stash.mkdir(parents=True)
@@ -115,8 +124,10 @@ class FilesTest(MoodleCase):
         d = files.listing(self.cfg, self.m, self.course, since=SINCE, everything=True)
         self.net.reply("GET", "002-dns.pdf", ToolError("moodle", "HTTP 404", where="pluginfile"))
         self.net.reply("GET", "lecture-01.pptx?token=test-token", b"new")
+        self.reply_downloads()
         out = files.pull(self.m, d, force=True)
-        self.assertEqual([g["name"] for g in out["pulled"]], ["lecture-01.pptx"])
+        self.assertEqual([g["name"] for g in out["pulled"]],
+                         ["video.mp4", "big.zip", "lecture-01.pptx"])
         self.assertEqual((self.stash / "lecture-01.pptx").read_bytes(), b"new")
         self.assertEqual([(e["where"], e["message"]) for e in out["errors"]],
                          [("002-dns.pdf", "HTTP 404")])
@@ -124,6 +135,10 @@ class FilesTest(MoodleCase):
 
 
 class SafeNameTest(unittest.TestCase):
+    def test_size_limit(self):
+        self.assertIsNone(files.skip_reason(100 * 1024 * 1024))
+        self.assertEqual(files.skip_reason(100 * 1024 * 1024 + 1), "размер 100 МиБ")
+
     def test_safe(self):
         self.assertEqual(files.safe("../a/b\\c.pdf"), ".._a_b_c.pdf")
         self.assertEqual(files.safe('Лекция 1: "введение" <v2>?.pdf'),

@@ -169,6 +169,8 @@ class SetupTest(SetupCase):
         self.net.reply("POST", ("core_course_get_contents", "courseid=1"),
                        fixture("course_contents"))
         self.net.reply("GET", "002-dns.pdf", b"%PDF-2")
+        self.net.reply("GET", "video.mp4", b"video")
+        self.net.reply("GET", "big.zip", b"archive")
         self.net.reply("GET", "lecture-01.pptx", b"PK")
         self.net.reply("POST", ("core_course_get_contents", "courseid=2"),
                        fixture("course_contents_small"))
@@ -193,7 +195,7 @@ class SetupTest(SetupCase):
         self.assertTrue((self.root / "2" / "NOTES.md").read_text(encoding="utf-8")
                         .startswith("# Вычислительные методы — заметки\n"))
         self.assertTrue(notes == (self.root / "nettech" / "NOTES.md").read_text(encoding="utf-8"))
-        self.assertIn("  nettech: скачано 2\n  2: скачано 1\n", out)
+        self.assertIn("  nettech: скачано 4\n  2: скачано 1\n", out)
         self.assertIn(["ok", "Курсы", "материалы курсов в stash/"], log)
         self.assertEqual((self.root / "nettech" / "stash" / "002-dns.pdf").read_bytes(), b"%PDF-2")
 

@@ -16,7 +16,7 @@ arguments); `130` interrupted.
 | `study task <course> <NN\|id\|cmid>` | one assignment: full text, deadline, what the answer accepts, its state, grade, feedback and comments, the submission profile and its skill, files on disk, matching `stash/` files |
 | `study assigns [--course <c>]` | assignments and deadlines, including those closed by an access restriction (with the reason) |
 | `study grades [--course <c>]` · `calendar [--days N]` · `status <id>` | grades, calendar deadlines, the state of one answer |
-| `study files [<course>] [--pull] [--all] [--force]` | course files new since the last run; `--pull` downloads documents up to 50 MB into `<course>/stash/` (all of them into an empty `stash/`, re-uploaded ones over the old copy); `--force` downloads everything again. Course links are listed as «ссылка … → URL» |
+| `study files [<course>] [--pull] [--all] [--force]` | course files new since the last run; `--pull` downloads files of any type up to 100 MiB into `<course>/stash/` (all of them into an empty `stash/`, re-uploaded ones over the old copy); `--force` downloads everything again. Course links are listed as «ссылка … → URL» |
 | `study submit <id> [--text F] [--attach F…] --confirm` | send an answer. Without `--confirm` it prints the plan; a plan that does not fit the assignment (text off, too many files, wrong type or size, closed) is refused even with `--confirm`. Sending is final |
 | `study upload <file>… [--itemid N]` · `submit … --files <itemid>` | the older two-step way to attach files |
 | `study courses [--all] [--setup]` | your courses with folder and profile; `--setup` edits `COURSE_IGNORE`, `CODE`, `FLOW` |
